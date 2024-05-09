@@ -35,15 +35,16 @@
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/util.h"
-#include "protocol/commands.pb.h"
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "base/logging.h"
+#include "base/util.h"
+#include "base/vlog.h"
+#include "protocol/commands.pb.h"
 
 namespace mozc {
 namespace {
@@ -64,7 +65,7 @@ class KeyParserData {
  private:
   void InitData() {
     //  CHECK(keymap::KeyType::NUM_KEYTYPES < static_cast<int32_t>(' '));
-    VLOG(1) << "Init KeyParser Data";
+    MOZC_VLOG(1) << "Init KeyParser Data";
 
     modifiers_map_["ctrl"] = {KeyEvent::CTRL};
     modifiers_map_["control"] = {KeyEvent::CTRL};
@@ -209,7 +210,7 @@ bool KeyParser::ParseKeyVector(const absl::Span<const std::string> keys,
         // Multiple keys are not supported.
         return false;
       }
-      key_event->set_key_code(Util::Utf8ToUcs4(key));
+      key_event->set_key_code(Util::Utf8ToCodepoint(key));
       continue;
     }
 

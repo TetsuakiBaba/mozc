@@ -34,28 +34,38 @@
 #include <utility>
 #include <vector>
 
-#include "base/file/temp_dir.h"
-#include "base/file_util.h"
-#include "base/logging.h"
-#include "base/status.h"
-#include "base/system_util.h"
-#include "testing/googletest.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+#include "base/environ.h"
+#include "base/file/temp_dir.h"
+#include "base/file_util.h"
+#include "base/system_util.h"
+#include "testing/googletest.h"
 
 namespace mozc {
 namespace testing {
 
-std::string GetSourcePath(const std::vector<absl::string_view> &components) {
-  const std::string test_srcdir = absl::GetFlag(FLAGS_test_srcdir);
-  std::vector<absl::string_view> abs_components = {test_srcdir};
+std::string GetSourcePath(absl::Span<const absl::string_view> components) {
+  std::vector<absl::string_view> abs_components;
 
-  const char *workspace = std::getenv("TEST_WORKSPACE");
-  if (workspace && workspace[0]) {
-    abs_components.push_back(workspace);
+  std::string test_srcdir = absl::GetFlag(FLAGS_test_srcdir);
+  if (test_srcdir.empty()) {
+    test_srcdir = Environ::GetEnv("TEST_SRCDIR");
+  }
+  if (!test_srcdir.empty()) {
+    abs_components.push_back(test_srcdir);
+  }
+
+  // Appends workspace from the env var.
+  const std::string test_workspace = Environ::GetEnv("TEST_WORKSPACE");
+  if (!test_workspace.empty()) {
+    abs_components.push_back(test_workspace);
   }
 
   abs_components.insert(abs_components.end(), components.begin(),
@@ -64,7 +74,7 @@ std::string GetSourcePath(const std::vector<absl::string_view> &components) {
 }
 
 absl::StatusOr<std::string> GetSourceFile(
-    const std::vector<absl::string_view> &components) {
+    absl::Span<const absl::string_view> components) {
   std::string path = GetSourcePath(components);
   if (absl::Status s = FileUtil::FileExists(path); !s.ok()) {
     return s;
@@ -72,15 +82,13 @@ absl::StatusOr<std::string> GetSourceFile(
   return path;
 }
 
-std::string GetSourceFileOrDie(
-    const std::vector<absl::string_view> &components) {
+std::string GetSourceFileOrDie(absl::Span<const absl::string_view> components) {
   absl::StatusOr<std::string> abs_path = GetSourceFile(components);
   CHECK_OK(abs_path);
   return *std::move(abs_path);
 }
 
-std::string GetSourceDirOrDie(
-    const std::vector<absl::string_view> &components) {
+std::string GetSourceDirOrDie(absl::Span<const absl::string_view> components) {
   const std::string path = GetSourcePath(components);
   CHECK_OK(FileUtil::DirectoryExists(path))
       << ": Directory doesn't exist: " << path;
@@ -88,8 +96,8 @@ std::string GetSourceDirOrDie(
 }
 
 std::vector<std::string> GetSourceFilesInDirOrDie(
-    const std::vector<absl::string_view> &dir_components,
-    const std::vector<absl::string_view> &filenames) {
+    absl::Span<const absl::string_view> dir_components,
+    absl::Span<const absl::string_view> filenames) {
   const std::string dir = GetSourceDirOrDie(dir_components);
   std::vector<std::string> paths;
   for (size_t i = 0; i < filenames.size(); ++i) {
@@ -100,10 +108,15 @@ std::vector<std::string> GetSourceFilesInDirOrDie(
   return paths;
 }
 
-// Creates a new unique TempDirectory and returns it.
 TempDirectory MakeTempDirectoryOrDie() {
   absl::StatusOr<TempDirectory> result =
       TempDirectory::Default().CreateTempDirectory();
+  CHECK_OK(result);
+  return *std::move(result);
+}
+
+TempFile MakeTempFileOrDie() {
+  absl::StatusOr<TempFile> result = TempDirectory::Default().CreateTempFile();
   CHECK_OK(result);
   return *std::move(result);
 }

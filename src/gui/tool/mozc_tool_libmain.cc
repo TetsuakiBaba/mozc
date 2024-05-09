@@ -34,9 +34,10 @@
 #endif  // _WIN32
 
 #include <QtGui>
-
 #include <string>
 
+#include "absl/flags/declare.h"
+#include "absl/flags/flag.h"
 #include "base/crash_report_handler.h"
 #include "base/file_util.h"
 #include "base/init_mozc.h"
@@ -44,8 +45,6 @@
 #include "base/run_level.h"
 #include "base/util.h"
 #include "config/stats_config_util.h"
-#include "absl/flags/declare.h"
-#include "absl/flags/flag.h"
 #include "gui/base/debug_util.h"
 
 #ifdef __APPLE__
@@ -54,6 +53,7 @@
 #include <iostream>
 #endif  // IGNORE_INVALID_FLAG
 #include "base/const.h"
+#include "base/environ.h"
 #endif  // __APPLE__
 
 #ifdef _WIN32
@@ -84,13 +84,13 @@ int RunPrelaunchProcesses(int argc, char *argv[]);
 namespace {
 
 void SetFlagsFromEnv() {
-  const char *mode = std::getenv("FLAGS_mode");
-  if (mode != nullptr) {
+  const std::string mode = mozc::Environ::GetEnv("FLAGS_mode");
+  if (!mode.empty()) {
     absl::SetFlag(&FLAGS_mode, mode);
   }
 
-  const char *error_type = std::getenv("FLAGS_error_type");
-  if (error_type != nullptr) {
+  const std::string error_type = mozc::Environ::GetEnv("FLAGS_error_type");
+  if (!error_type.empty()) {
     absl::SetFlag(&FLAGS_error_type, error_type);
   }
 }

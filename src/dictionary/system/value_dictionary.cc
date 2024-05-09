@@ -33,6 +33,7 @@
 #include <queue>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "base/util.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_token.h"
@@ -40,7 +41,6 @@
 #include "dictionary/system/codec_interface.h"
 #include "request/conversion_request.h"
 #include "storage/louds/louds_trie.h"
-#include "absl/strings/string_view.h"
 
 namespace mozc {
 namespace dictionary {
@@ -102,12 +102,14 @@ inline DictionaryInterface::Callback::ResultType HandleTerminalNode(
 
   value->clear();
   codec.DecodeValue(encoded_value, value);
-  const DictionaryInterface::Callback::ResultType result =
-      callback->OnKey(*value);
+  DictionaryInterface::Callback::ResultType result = callback->OnKey(*value);
   if (result != DictionaryInterface::Callback::TRAVERSE_CONTINUE) {
     return result;
   }
-
+  result = callback->OnActualKey(*value, *value, /* num_expanded= */ 0);
+  if (result != DictionaryInterface::Callback::TRAVERSE_CONTINUE) {
+    return result;
+  }
   FillToken(suggestion_only_word_id, *value, token);
   return callback->OnToken(*value, *value, *token);
 }
@@ -178,6 +180,10 @@ void ValueDictionary::LookupExact(absl::string_view key,
     return;
   }
   if (callback->OnKey(key) != Callback::TRAVERSE_CONTINUE) {
+    return;
+  }
+  if (callback->OnActualKey(key, key, /* num_expanded= */ 0) !=
+      Callback::TRAVERSE_CONTINUE) {
     return;
   }
   Token token;

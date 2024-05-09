@@ -31,13 +31,13 @@
 
 #include <string>
 
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 #include "base/file/temp_dir.h"
 #include "base/logging.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
-#include "absl/status/status.h"
-#include "absl/strings/str_format.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,6 +73,9 @@ TEST(FileUtilTest, CreateDirectory) {
   // Create the directory.
   EXPECT_OK(FileUtil::CreateDirectory(dirpath));
   EXPECT_OK(FileUtil::DirectoryExists(dirpath));
+
+  // Create the same directory again.
+  EXPECT_OK(FileUtil::CreateDirectory(dirpath));
 
   // Delete the directory.
   ASSERT_OK(FileUtil::RemoveDirectory(dirpath));
@@ -491,36 +494,39 @@ TEST(FileUtilTest, GetAndSetContents) {
   const std::string filename = FileUtil::JoinPath(temp_dir.path(), "test.txt");
 
   // File doesn't exist yet.
-  std::string content;
-  EXPECT_TRUE(absl::IsNotFound(FileUtil::GetContents(filename, &content)));
+  EXPECT_TRUE(absl::IsNotFound(FileUtil::GetContents(filename).status()));
 
   // Basic write and read test.
   ASSERT_OK(FileUtil::SetContents(filename, "test"));
   FileUnlinker unlinker(filename);
-  EXPECT_OK(FileUtil::GetContents(filename, &content));
-  EXPECT_EQ(content, "test");
+  absl::StatusOr<std::string> content = FileUtil::GetContents(filename);
+  EXPECT_OK(content);
+  EXPECT_EQ(*content, "test");
 
   // Overwrite test.
   ASSERT_OK(FileUtil::SetContents(filename, "more tests!"));
-  EXPECT_OK(FileUtil::GetContents(filename, &content));
-  EXPECT_EQ(content, "more tests!");
+  content = FileUtil::GetContents(filename);
+  EXPECT_OK(content);
+  EXPECT_EQ(*content, "more tests!");
 
   // Text mode write.
   ASSERT_OK(FileUtil::SetContents(filename, "test\ntest\n", std::ios::out));
-  EXPECT_OK(FileUtil::GetContents(filename, &content));
+  content = FileUtil::GetContents(filename);
+  EXPECT_OK(content);
 #ifdef _WIN32
-  EXPECT_EQ(content, "test\r\ntest\r\n");
+  EXPECT_EQ(*content, "test\r\ntest\r\n");
 #else   // _WIN32
-  EXPECT_EQ(content, "test\ntest\n");
+  EXPECT_EQ(*content, "test\ntest\n");
 #endif  // _WIN32
 
   // Text mode read.
   ASSERT_OK(FileUtil::SetContents(filename, "test\r\ntest\r\n"));
-  EXPECT_OK(FileUtil::GetContents(filename, &content, std::ios::in));
+  content = FileUtil::GetContents(filename, std::ios::in);
+  EXPECT_OK(content);
 #ifdef _WIN32
-  EXPECT_EQ(content, "test\ntest\n");
+  EXPECT_EQ(*content, "test\ntest\n");
 #else   // _WIN32
-  EXPECT_EQ(content, "test\r\ntest\r\n");
+  EXPECT_EQ(*content, "test\r\ntest\r\n");
 #endif  // _WIN32
 }
 

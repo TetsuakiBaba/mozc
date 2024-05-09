@@ -83,16 +83,23 @@ def SymlinkQtFrameworks(app_dir: str) -> None:
     framework_dir = os.path.join(app_dir,
                                  f'Contents/Frameworks/{framework}.framework/')
 
+    # Restore symlinks. Bazel uses zip without consideration of symlinks.
+    # It changes symlink files to normal files. The following logics remove
+    # those normal files and make symlinks again.
+
+    # rm {app_dir}/QtCore.framework/Versions/Current
     # ln -s A {app_dir}/QtCore.framework/Versions/Current
+    os.remove(framework_dir + 'Versions/Current')
     os.symlink('A', framework_dir + 'Versions/Current')
 
     # rm {app_dir}/QtCore.framework/QtCore
-    os.remove(framework_dir + framework)
-
     # ln -s Versions/Current/QtCore {app_dir}/QtCore.framework/QtCore
+    os.remove(framework_dir + framework)
     os.symlink('Versions/Current/' + framework, framework_dir + framework)
 
+    # rm {app_dir}/QtCore.framework/Resources
     # ln -s Versions/Current/Resources {app_dir}/QtCore.framework/Resources
+    os.remove(framework_dir + 'Resources')
     os.symlink('Versions/Current/Resources', framework_dir + 'Resources')
 
 
@@ -116,6 +123,12 @@ def TweakQtApps(top_dir: str, oss: bool) -> None:
     framework_dir = os.path.join(app_dir, 'Contents/Frameworks')
     if not any(os.scandir(framework_dir)):
       os.rmdir(framework_dir)
+
+    # Codesign again. '-' means psuedo identity.
+    # https://github.com/bazelbuild/rules_apple/blob/3.5.1/apple/internal/codesigning_support.bzl#L42
+    # https://developer.apple.com/documentation/security/seccodesignatureflags/1397793-adhoc
+    codesign = ['/usr/bin/codesign', '--force', '--sign', '-', app_dir]
+    util.RunOrDie(codesign)
 
   main_qt_apps = [
       'ConfigDialog.app',

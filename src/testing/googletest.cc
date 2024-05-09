@@ -32,9 +32,9 @@
 
 #include <string>
 
+#include "absl/flags/flag.h"
 #include "base/environ.h"
 #include "base/file/temp_dir.h"
-#include "absl/flags/flag.h"
 
 ABSL_FLAG(std::string, test_srcdir, "",
           "A directory that contains the input data files for a test.");
@@ -49,9 +49,9 @@ namespace {
 #include "testing/mozc_data_dir.h"
 
 std::string GetTestSrcdir() {
-  const char* srcdir_env = Environ::GetEnv("TEST_SRCDIR");
-  if (srcdir_env && srcdir_env[0]) {
-    return srcdir_env;
+  const std::string srcdir = Environ::GetEnv("TEST_SRCDIR");
+  if (!srcdir.empty()) {
+    return srcdir;
   }
 
   return kMozcDataDir;

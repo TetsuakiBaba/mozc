@@ -43,24 +43,25 @@
 #include <utility>
 #include <vector>
 
-#include "base/config_file_stream.h"
-#include "base/logging.h"
-#include "base/singleton.h"
-#include "base/util.h"
-#include "composer/key_parser.h"
-#include "protocol/commands.pb.h"
-#include "protocol/config.pb.h"
-#include "session/internal/keymap.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "base/config_file_stream.h"
+#include "base/logging.h"
+#include "base/singleton.h"
+#include "base/util.h"
+#include "base/vlog.h"
+#include "composer/key_parser.h"
 #include "gui/base/table_util.h"
 #include "gui/base/util.h"
 #include "gui/config_dialog/combobox_delegate.h"
 #include "gui/config_dialog/generic_table_editor.h"
 #include "gui/config_dialog/keybinding_editor_delegate.h"
+#include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
+#include "session/internal/keymap.h"
 // TODO(komatsu): internal files should not be used from external modules.
 
 #if defined(__ANDROID__) || defined(__wasm__)
@@ -130,20 +131,20 @@ class KeyMapValidator {
     mozc::commands::KeyEvent key_event;
     const bool parse_success = mozc::KeyParser::ParseKey(key, &key_event);
     if (!parse_success) {
-      VLOG(3) << "key parse failed";
+      MOZC_VLOG(3) << "key parse failed";
       return false;
     }
     for (size_t i = 0; i < key_event.modifier_keys_size(); ++i) {
       if (invisible_modifiers_.find(key_event.modifier_keys(i)) !=
           invisible_modifiers_.end()) {
-        VLOG(3) << "invisible modifiers: " << key_event.modifier_keys(i);
+        MOZC_VLOG(3) << "invisible modifiers: " << key_event.modifier_keys(i);
         return false;
       }
     }
     if (key_event.has_special_key() &&
         (invisible_key_events_.find(key_event.special_key()) !=
          invisible_key_events_.end())) {
-      VLOG(3) << "invisible special key: " << key_event.special_key();
+      MOZC_VLOG(3) << "invisible special key: " << key_event.special_key();
       return false;
     }
     return true;
@@ -156,7 +157,7 @@ class KeyMapValidator {
 
   bool IsVisibleCommand(const absl::string_view command) {
     if (invisible_commands_.contains(command)) {
-      VLOG(3) << "invisible command: " << command;
+      MOZC_VLOG(3) << "invisible command: " << command;
       return false;
     }
     return true;
@@ -344,7 +345,7 @@ bool KeyMapEditorDialog::LoadFromStream(std::istream *is) {
     std::vector<std::string> fields =
         absl::StrSplit(line, '\t', absl::SkipEmpty());
     if (fields.size() < 3) {
-      VLOG(3) << "field size < 3";
+      MOZC_VLOG(3) << "field size < 3";
       continue;
     }
 
@@ -354,13 +355,13 @@ bool KeyMapEditorDialog::LoadFromStream(std::istream *is) {
 
     // don't accept invalid keymap entries.
     if (!Singleton<KeyMapValidator>::get()->IsValidEntry(fields)) {
-      VLOG(3) << "invalid entry.";
+      MOZC_VLOG(3) << "invalid entry.";
       continue;
     }
 
     // don't show invisible (not configurable) keymap entries.
     if (!Singleton<KeyMapValidator>::get()->IsVisibleEntry(fields)) {
-      VLOG(3) << "invalid entry to show. add to invisible_keymap_table_";
+      MOZC_VLOG(3) << "invalid entry to show. add to invisible_keymap_table_";
       absl::StrAppend(&invisible_keymap_table_, status, "\t", key, "\t",
                       command, "\n");
       continue;

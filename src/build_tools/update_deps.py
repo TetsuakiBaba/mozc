@@ -81,15 +81,9 @@ class ArchiveInfo:
 
 
 QT6 = ArchiveInfo(
-    url='https://download.qt.io/archive/qt/6.5/6.5.2/submodules/qtbase-everywhere-src-6.5.2.tar.xz',
-    size=48410716,
-    sha256='3db4c729b4d80a9d8fda8dd77128406353baff4755ca619177eda4cddae71269',
-)
-
-WIX = ArchiveInfo(
-    url='https://wixtoolset.org/downloads/v3.14.0.6526/wix314-binaries.zip',
-    size=41223699,
-    sha256='4c89898df3bcab13e12f7ca54399c35ad273475ad2cb6284611d00ae2d063c2c',
+    url='https://download.qt.io/archive/qt/6.7/6.7.0/submodules/qtbase-everywhere-src-6.7.0.tar.xz',
+    size=49314276,
+    sha256='11b2e29e2e52fb0e3b453ea13bbe51a10fdff36e1c192d8868c5a40233b8b254',
 )
 
 NINJA_MAC = ArchiveInfo(
@@ -232,59 +226,6 @@ class ProgressPrinter:
       self.cleaner.cleanup()
 
 
-def wix_extract_filter(
-    members: Iterator[zipfile.ZipInfo],
-) -> Iterator[zipfile.ZipInfo]:
-  """Custom extract filter for the WiX Zip archive.
-
-  This custom filter can be used to adjust directory structure and drop
-  unnecessary files/directories to save disk space.
-
-  Args:
-    members: an iterator of ZipInfo from the Zip archive.
-
-  Yields:
-    an iterator of ZipInfo to be extracted.
-  """
-  with ProgressPrinter() as printer:
-    for info in members:
-      paths = info.filename.split('/')
-      if '..' in paths:
-        continue
-      if len(paths) >= 2:
-        printer.print_line('skipping   ' + info.filename)
-        continue
-      else:
-        printer.print_line('extracting ' + info.filename)
-        yield info
-
-
-def extract_wix(dryrun: bool = False) -> None:
-  """Extract WiX archive.
-
-  Args:
-    dryrun: True if this is a dry-run.
-  """
-  dest = ABS_THIRD_PARTY_DIR.joinpath('wix').absolute()
-  src = CACHE_DIR.joinpath(WIX.filename)
-
-  if dryrun:
-    if dest.exists():
-      print(f"dryrun: shutil.rmtree(r'{dest}')")
-    print(f'dryrun: Extracting {src}')
-    return
-
-  def filename(members: Iterator[zipfile.ZipInfo]):
-    if dest.exists():
-      shutil.rmtree(dest)
-    for info in members:
-      yield info.filename
-  with zipfile.ZipFile(src) as z:
-    z.extractall(
-        path=dest, members=filename(wix_extract_filter(z.infolist()))
-    )
-
-
 def extract_ninja(dryrun: bool = False) -> None:
   """Extract ninja-win archive.
 
@@ -339,6 +280,35 @@ def update_submodules(dryrun: bool = False) -> None:
     subprocess.run(command, shell=True, check=True)
 
 
+def exec_command(args: list[str], cwd: os.PathLike) -> None:
+  """Runs the given command then returns the output.
+
+  Args:
+    args: The command to be executed.
+
+  Raises:
+    ChildProcessError: When the given command cannot be executed.
+  """
+  process = subprocess.Popen(args, stdout=subprocess.PIPE, shell=False, cwd=cwd)
+  _, _ = process.communicate()
+  exitcode = process.wait()
+  if exitcode != 0:
+    raise ChildProcessError(f'Failed to execute {args}')
+
+
+def restore_dotnet_tools(dryrun: bool = False) -> None:
+  """Run 'dotnet tool restore'.
+
+  Args:
+    dryrun: true to perform dryrun.
+  """
+  args = ['dotnet', 'tool', 'restore']
+  if dryrun:
+    print(f'dryrun: exec_command({args}, cwd={ABS_MOZC_SRC_DIR})')
+  else:
+    exec_command(args, cwd=ABS_MOZC_SRC_DIR)
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--dryrun', action='store_true', default=False)
@@ -358,8 +328,6 @@ def main():
       archives.append(NINJA_MAC)
     elif is_windows():
       archives.append(NINJA_WIN)
-  if (not args.nowix) and is_windows():
-    archives.append(WIX)
 
   for archive in archives:
     download(archive, args.dryrun)
@@ -367,8 +335,8 @@ def main():
   if args.cache_only:
     return
 
-  if WIX in archives:
-    extract_wix(args.dryrun)
+  if (not args.nowix) and is_windows():
+    restore_dotnet_tools(args.dryrun)
 
   if (NINJA_WIN in archives) or (NINJA_MAC in archives):
     extract_ninja(args.dryrun)

@@ -14,9 +14,6 @@ git clone https://github.com/google/mozc.git
 cd mozc\src
 
 python build_tools/update_deps.py
-
-"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsamd64_x86.bat"
-
 python build_tools/build_qt.py --release --confirm_license
 python build_mozc.py gyp
 python build_mozc.py build -c Release package
@@ -42,6 +39,7 @@ Building Mozc on Windows requires the following software.
   * Python 3.9 or later with the following pip modules.
     * `six`
     * `requests`
+  * `.NET 6` or later (for `dotnet` command).
 
 ### Install pip modules
 
@@ -67,22 +65,13 @@ python build_tools/update_deps.py
 In this step, additional build dependencies will be downloaded.
 
   * [Ninja 1.11.0](https://github.com/ninja-build/ninja/releases/download/v1.11.0/ninja-win.zip)
-  * [Qt 6.5.2](https://download.qt.io/archive/qt/6.5/6.5.2/submodules/qtbase-everywhere-src-6.5.2.tar.xz)
-  * [WiX 3.14.0.6526](https://wixtoolset.org/downloads/v3.14.0.6526/wix314-binaries.zip)
+  * [Qt 6.7.0](https://download.qt.io/archive/qt/6.7/6.7.0/submodules/qtbase-everywhere-src-6.7.0.tar.xz)
+  * [.NET tools](../dotnet-tools.json)
   * [git submodules](../.gitmodules)
 
 You can skip this step if you would like to manually download these libraries.
 
 ## Build
-
-### Setup Build system
-
-If you have not set up the build system in your command prompt, you might need
-to execute the setup command like this.
-
-```
-"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsamd64_x86.bat"
-```
 
 ### Build Qt
 

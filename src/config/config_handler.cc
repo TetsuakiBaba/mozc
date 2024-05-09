@@ -36,21 +36,22 @@
 #include <string>
 #include <utility>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/log/log.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
 #include "base/clock.h"
 #include "base/config_file_stream.h"
 #include "base/hash.h"
-#include "base/logging.h"
 #include "base/port.h"
 #include "base/singleton.h"
 #include "base/strings/assign.h"
 #include "base/system_util.h"
 #include "base/version.h"
+#include "base/vlog.h"
 #include "protocol/config.pb.h"
-#include "absl/base/thread_annotations.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/string_view.h"
-#include "absl/synchronization/mutex.h"
-#include "absl/time/time.h"
 
 namespace mozc {
 namespace config {
@@ -93,7 +94,7 @@ class ConfigHandlerImpl final {
   void Reload() ABSL_LOCKS_EXCLUDED(mutex_);
   void SetConfigFileName(absl::string_view filename)
       ABSL_LOCKS_EXCLUDED(mutex_);
-  const std::string &GetConfigFileName() ABSL_LOCKS_EXCLUDED(mutex_);
+  std::string GetConfigFileName() ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
   // copy config to config_ and do some
@@ -141,7 +142,7 @@ void ConfigHandlerImpl::SetConfigInternal(Config config) {
   }
 #endif  // MOZC_NO_LOGGING
 
-  Logging::SetConfigVerboseLevel(config_.verbose_level());
+  mozc::internal::SetConfigVLogLevel(config_.verbose_level());
 
   // Initialize platform specific configuration.
   if (config_.session_keymap() == Config::NONE) {
@@ -176,14 +177,14 @@ void ConfigHandlerImpl::SetConfig(const Config &config) {
 
   ConfigHandler::SetMetaData(&output_config);
 
-  VLOG(1) << "Setting new config: " << filename_;
+  MOZC_VLOG(1) << "Setting new config: " << filename_;
   ConfigFileStream::AtomicUpdate(filename_, output_config.SerializeAsString());
 
 #ifdef DEBUG
   std::string debug_content = absl::StrCat(
       "# This is a text-based config file for debugging.\n"
       "# Nothing happens when you edit this file manually.\n",
-      output_config.DebugString());
+      output_config);
   ConfigFileStream::AtomicUpdate(absl::StrCat(filename_, ".txt"),
                                  debug_content);
 #endif  // DEBUG
@@ -198,7 +199,7 @@ void ConfigHandlerImpl::Reload() {
 }
 
 void ConfigHandlerImpl::ReloadUnlocked() {
-  VLOG(1) << "Reloading config file: " << filename_;
+  MOZC_VLOG(1) << "Reloading config file: " << filename_;
   std::unique_ptr<std::istream> is(ConfigFileStream::OpenReadBinary(filename_));
   Config input_proto;
 
@@ -215,12 +216,12 @@ void ConfigHandlerImpl::ReloadUnlocked() {
 
 void ConfigHandlerImpl::SetConfigFileName(const absl::string_view filename) {
   absl::MutexLock lock(&mutex_);
-  VLOG(1) << "set new config file name: " << filename;
+  MOZC_VLOG(1) << "set new config file name: " << filename;
   strings::Assign(filename_, filename);
   ReloadUnlocked();
 }
 
-const std::string &ConfigHandlerImpl::GetConfigFileName() {
+std::string ConfigHandlerImpl::GetConfigFileName() {
   absl::MutexLock lock(&mutex_);
   return filename_;
 }
@@ -284,7 +285,7 @@ void ConfigHandler::SetConfigFileName(const absl::string_view filename) {
   GetConfigHandlerImpl()->SetConfigFileName(filename);
 }
 
-const std::string &ConfigHandler::GetConfigFileName() {
+std::string ConfigHandler::GetConfigFileName() {
   return GetConfigHandlerImpl()->GetConfigFileName();
 }
 

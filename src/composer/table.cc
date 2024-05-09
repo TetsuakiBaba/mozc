@@ -40,19 +40,18 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
 #include "base/hash.h"
 #include "base/logging.h"
 #include "base/util.h"
 #include "composer/internal/special_key.h"
-#include "composer/internal/typing_model.h"
 #include "data_manager/data_manager_interface.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "absl/strings/match.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_split.h"
-#include "absl/strings/string_view.h"
 
 namespace mozc {
 namespace composer {
@@ -139,12 +138,9 @@ constexpr absl::string_view kSquareClose = "]";
 constexpr absl::string_view kMiddleDot = "・";
 
 bool Table::InitializeWithRequestAndConfig(
-    const commands::Request &request, const config::Config &config,
-    const DataManagerInterface &data_manager) {
+    const commands::Request &request, const config::Config &config) {
   case_sensitive_ = false;
   bool result = false;
-  typing_model_ = TypingModel::CreateTypingModel(
-      request.special_romanji_table(), data_manager);
   if (request.special_romanji_table() !=
       mozc::commands::Request::DEFAULT_TABLE) {
     const char *table_file_name;
@@ -391,8 +387,8 @@ const Entry *Table::AddRuleWithAttributes(
   if (!case_sensitive_) {
     const std::string trimed_input = DeleteSpecialKeys(input);
     for (ConstChar32Iterator iter(trimed_input); !iter.Done(); iter.Next()) {
-      const char32_t ucs4 = iter.Get();
-      if ('A' <= ucs4 && ucs4 <= 'Z') {
+      const char32_t codepoint = iter.Get();
+      if ('A' <= codepoint && codepoint <= 'Z') {
         case_sensitive_ = true;
         break;
       }
@@ -429,8 +425,6 @@ bool Table::LoadFromFile(const char *filepath) {
   }
   return LoadFromStream(ifs.get());
 }
-
-const TypingModel *Table::typing_model() const { return typing_model_.get(); }
 
 namespace {
 constexpr char kAttributeDelimiter = ' ';
@@ -548,9 +542,7 @@ bool Table::HasSubRules(const absl::string_view input) const {
   }
 }
 
-void Table::DeleteEntry(const Entry *entry) {
-  entry_set_.erase(entry);
-}
+void Table::DeleteEntry(const Entry *entry) { entry_set_.erase(entry); }
 
 bool Table::case_sensitive() const { return case_sensitive_; }
 
@@ -573,9 +565,8 @@ const Table &Table::GetDefaultTable() {
 TableManager::TableManager()
     : custom_roman_table_fingerprint_(Fingerprint32("")) {}
 
-const Table *TableManager::GetTable(
-    const mozc::commands::Request &request, const mozc::config::Config &config,
-    const mozc::DataManagerInterface &data_manager) {
+const Table *TableManager::GetTable(const mozc::commands::Request &request,
+                                    const mozc::config::Config &config) {
   // calculate the hash depending on the request and the config
   uint32_t hash = request.special_romanji_table();
   hash = hash * (mozc::config::Config_PreeditMethod_PreeditMethod_MAX + 1) +
@@ -609,7 +600,7 @@ const Table *TableManager::GetTable(
   }
 
   auto table = std::make_unique<Table>();
-  if (!table->InitializeWithRequestAndConfig(request, config, data_manager)) {
+  if (!table->InitializeWithRequestAndConfig(request, config)) {
     return nullptr;
   }
 
