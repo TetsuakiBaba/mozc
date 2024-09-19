@@ -30,6 +30,7 @@
 #include "converter/segments.h"
 
 #include <algorithm>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -42,9 +43,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "base/logging.h"
 #include "base/number_util.h"
 #include "base/vlog.h"
 
@@ -139,7 +141,7 @@ std::string Segment::Candidate::DebugString() const {
   os << "(key=" << key << " ckey=" << content_key << " val=" << value
      << " cval=" << content_value << " cost=" << cost
      << " scost=" << structure_cost << " wcost=" << wcost << " lid=" << lid
-     << " rid=" << rid << " attributes=" << attributes
+     << " rid=" << rid << " attributes=" << std::bitset<16>(attributes)
      << " consumed_key_size=" << consumed_key_size;
   if (!prefix.empty()) {
     os << " prefix=" << prefix;

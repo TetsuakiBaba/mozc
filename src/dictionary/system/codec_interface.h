@@ -30,11 +30,13 @@
 #ifndef MOZC_DICTIONARY_SYSTEM_CODEC_INTERFACE_H_
 #define MOZC_DICTIONARY_SYSTEM_CODEC_INTERFACE_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace mozc {
 namespace dictionary {
@@ -83,7 +85,7 @@ class SystemDictionaryCodecInterface {
   virtual size_t GetDecodedKeyLength(absl::string_view src) const = 0;
 
   // Encode tokens(word info) for a certain key
-  virtual void EncodeTokens(const std::vector<TokenInfo> &tokens,
+  virtual void EncodeTokens(absl::Span<const TokenInfo> tokens,
                             std::string *output) const = 0;
 
   // Decode token(word info) for a certain key

@@ -27,12 +27,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_BASE_LOGGING_H_
-#define MOZC_BASE_LOGGING_H_
+#ifndef MOZC_BASE_PROTOBUF_REPEATED_PTR_FIELD_H_
+#define MOZC_BASE_PROTOBUF_REPEATED_PTR_FIELD_H_
 
-// These includes are kept for legacy reasons. Prefer including them directly.
-#include "absl/log/check.h"  // IWYU pragma: keep
-#include "absl/log/log.h"    // IWYU pragma: keep
+#include "base/protobuf/protobuf.h"  // IWYU pragma: keep
 
+#include "google/protobuf/repeated_ptr_field.h"       // IWYU pragma: export
 
-#endif  // MOZC_BASE_LOGGING_H_
+#endif  // MOZC_BASE_PROTOBUF_REPEATED_PTR_FIELD_H_

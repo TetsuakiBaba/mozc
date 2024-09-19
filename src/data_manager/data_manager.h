@@ -38,7 +38,6 @@
 #include <ostream>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
@@ -84,8 +83,10 @@ class DataManager : public DataManagerInterface {
   // Parses |array| and extracts byte blocks of data set.  The |array| must
   // outlive this instance.  The second version specifies a custom magic number
   // to expect (e.g., mock data set has a different magic number).
+  // The third version specifies the length of the magic number in bytes.
   Status InitFromArray(absl::string_view array);
   Status InitFromArray(absl::string_view array, absl::string_view magic);
+  Status InitFromArray(absl::string_view array, size_t magic_length);
 
   // The same as above InitFromArray() but the data is loaded using mmap, which
   // is owned in this instance.

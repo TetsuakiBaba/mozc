@@ -39,7 +39,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/algorithm/container.h"
 #include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
@@ -63,10 +62,9 @@
 #include "dictionary/pos_matcher.h"
 #include "dictionary/single_kanji_dictionary.h"
 #include "engine/modules.h"
-#include "engine/spellchecker_interface.h"
+#include "engine/supplemental_model_interface.h"
 #include "prediction/dictionary_prediction_aggregator.h"
 #include "prediction/prediction_aggregator_interface.h"
-#include "prediction/rescorer_interface.h"
 #include "prediction/result.h"
 #include "prediction/suggestion_filter.h"
 #include "protocol/commands.pb.h"
@@ -208,82 +206,6 @@ void MaybeFixRealtimeTopCost(absl::string_view input_key,
 
 }  // namespace
 
-// Computes the typing correction mixing params.
-// from the `base_result` and `typing_corrected_results`
-TypingCorrectionMixingParams GetTypingCorrectionMixingParams(
-    const ConversionRequest &request, const Segments &segments,
-    absl::Span<const Result> base_results,
-    absl::Span<const Result> typing_corrected_results) {
-  TypingCorrectionMixingParams typing_correction_mixing_params;
-
-  if (base_results.empty() || typing_corrected_results.empty()) {
-    return typing_correction_mixing_params;
-  }
-
-  // Sets literal on top when the corrections do not have sufficient
-  // confidence.
-  auto find_best_result = [](absl::Span<const Result> v) -> const Result & {
-    return *absl::c_max_element(v, [](const auto &lhs, const auto &rhs) {
-      return ResultCostLess()(rhs, lhs);
-    });
-  };
-
-  const Result &base_best_result = find_best_result(base_results);
-  const Result &tc_best_result = find_best_result(typing_corrected_results);
-  const auto &params = request.request().decoder_experiment_params();
-
-  auto is_literal_on_top = [&]() {
-    // When the best candidate is SPELLING_CORRECTION (not a typing correction),
-    // do not run literal-on-top.
-    if (base_best_result.candidate_attributes &
-        Segment::Candidate::SPELLING_CORRECTION) {
-      return false;
-    }
-
-    // TC result may be the same as the non-TC result when
-    // prefix match. In this case, literal-on-top is unintentionally
-    // triggered.
-    if (params.fix_literal_on_top() &&
-        base_best_result.value == tc_best_result.value) {
-      return false;
-    }
-
-    if (tc_best_result.typing_correction_score <=
-        params.typing_correction_literal_on_top_correction_score_max_diff()) {
-      return true;
-    }
-
-    if ((base_best_result.cost - tc_best_result.cost) <=
-        params.typing_correction_literal_on_top_conversion_cost_max_diff()) {
-      return true;
-    }
-
-    const size_t input_key_len =
-        Util::CharsLen(segments.conversion_segment(0).key());
-
-    if (params.typing_correction_literal_on_top_length_score_max_diff() > 0.0 &&
-        params.typing_correction_literal_on_top_length_decay() > 0.0 &&
-        tc_best_result.typing_correction_score <=
-            params.typing_correction_literal_on_top_length_score_max_diff() *
-                std::pow(params.typing_correction_literal_on_top_length_decay(),
-                         std::max<int>(input_key_len - 3, 0))) {
-      return true;
-    }
-
-    return false;
-  };
-
-  typing_correction_mixing_params.literal_on_top = is_literal_on_top();
-
-  // Literal-at-least-second parameter is now defined as flag.
-  typing_correction_mixing_params.literal_at_least_second =
-      request.request()
-          .decoder_experiment_params()
-          .typing_correction_literal_at_least_second();
-
-  return typing_correction_mixing_params;
-}
-
 DictionaryPredictor::DictionaryPredictor(
     const engine::Modules &modules, const ConverterInterface *converter,
     const ImmutableConverterInterface *immutable_converter)
@@ -389,6 +311,8 @@ bool DictionaryPredictor::PredictForRequest(const ConversionRequest &request,
   const TypingCorrectionMixingParams typing_correction_mixing_params =
       MaybePopulateTypingCorrectedResults(request, *segments, &results);
 
+  MaybeRescoreResults(request, *segments, absl::MakeSpan(results));
+
   return AddPredictionToCandidates(request, segments,
                                    typing_correction_mixing_params,
                                    absl::MakeSpan(results));
@@ -411,8 +335,6 @@ void DictionaryPredictor::RewriteResultsForPrediction(
   } else {
     SetPredictionCost(request.request_type(), segments, results);
   }
-
-  MaybeRescoreResults(request, segments, absl::MakeSpan(*results));
 
   if (!is_mixed_conversion) {
     const size_t input_key_len =
@@ -539,13 +461,12 @@ bool DictionaryPredictor::AddPredictionToCandidates(
     final_results_ptrs.emplace_back(&result);
   }
 
-  const bool fix_literal_on_top =
-      request.request().decoder_experiment_params().fix_literal_on_top();
-
-  if (fix_literal_on_top) {
-    // Runs literal on top on `final_results_ptrs` instead of segments.
-    // segments may contain the history candidate.
-    MaybeSuppressAggressiveTypingCorrection2(
+  const auto &params = request.request().decoder_experiment_params();
+  if (params.typing_correction_result_reranker_mode() > 0) {
+    MaybeRerankAggressiveTypingCorrection(request, *segments,
+                                          &final_results_ptrs);
+  } else {
+    MaybeSuppressAggressiveTypingCorrection(
         request, typing_correction_mixing_params, &final_results_ptrs);
   }
 
@@ -555,15 +476,10 @@ bool DictionaryPredictor::AddPredictionToCandidates(
                   merged_types, segment->push_back_candidate());
   }
 
-  // TODO(b/320221782): Add unit tests for MaybeApplyHomonymCorrection.
-  MaybeApplyHomonymCorrection(modules_, segments);
+  // TODO(b/320221782): Add unit tests for MaybeApplyPostCorrection.
+  MaybeApplyPostCorrection(request, modules_, segments);
 
-  if (!fix_literal_on_top) {
-    MaybeSuppressAggressiveTypingCorrection(
-        request, typing_correction_mixing_params, segments);
-  }
-
-  if (IsDebug(request) && modules_.GetRescorer() != nullptr) {
+  if (IsDebug(request) && modules_.GetSupplementalModel()) {
     AddRescoringDebugDescription(segments);
   }
 
@@ -571,54 +487,21 @@ bool DictionaryPredictor::AddPredictionToCandidates(
 #undef MOZC_ADD_DEBUG_CANDIDATE
 }
 
-// static
-void DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection(
-    const ConversionRequest &request,
-    const TypingCorrectionMixingParams &typing_correction_mixing_params,
-    Segments *segments) {
-  if (segments->conversion_segments_size() == 0 ||
-      segments->conversion_segment(0).candidates_size() <= 1) {
-    return;
-  }
+void DictionaryPredictor::MaybeRerankAggressiveTypingCorrection(
+    const ConversionRequest &request, const Segments &segments,
+    std::vector<absl::Nonnull<const Result *>> *results) const {
+  const auto &params = request.request().decoder_experiment_params();
+  if (params.typing_correction_result_reranker_mode() == 0) return;
 
-  Segment *segment = segments->mutable_conversion_segment(0);
+  const engine::SupplementalModelInterface *supplemental_model =
+      modules_.GetSupplementalModel();
+  if (supplemental_model == nullptr) return;
 
-  // Top is already literal.
-  if (!(segment->candidate(0).attributes &
-        Segment::Candidate::TYPING_CORRECTION)) {
-    return;
-  }
-
-  const bool force_literal_on_top =
-      typing_correction_mixing_params.literal_on_top;
-  const bool literal_at_least_second =
-      typing_correction_mixing_params.literal_at_least_second;
-
-  if (!force_literal_on_top && !literal_at_least_second) {
-    return;
-  }
-
-  const int max_size = std::min<int>(10, segment->candidates_size());
-  for (int i = 1; i < max_size; ++i) {
-    const auto &c = segment->candidate(i);
-    // Finds the first non-typing-corrected candidate.
-    if (!(c.attributes & Segment::Candidate::TYPING_CORRECTION)) {
-      // Replace the literal with top when the cost is close enough or
-      // force_literal_on_top is true.
-      if (force_literal_on_top) {
-        segment->move_candidate(i, 0);
-      } else if (literal_at_least_second && i >= 2) {
-        // Moves the literal to the second position even when
-        // literal-on-top condition doesn't match.
-        segment->move_candidate(i, 1);
-      }
-      break;
-    }
-  }
+  supplemental_model->RerankTypingCorrection(request, segments, results);
 }
 
 // static
-void DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection2(
+void DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection(
     const ConversionRequest &request,
     const TypingCorrectionMixingParams &typing_correction_mixing_params,
     std::vector<absl::Nonnull<const Result *>> *results) {
@@ -627,7 +510,16 @@ void DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection2(
   // Top is already literal.
   const auto &top_result = results->front();
 
-  if (!(top_result->types & PredictionType::TYPING_CORRECTION)) {
+  const auto &params = request.request().decoder_experiment_params();
+
+  auto is_typing_correction = [&](const Result &result) {
+    return (result.types & PredictionType::TYPING_CORRECTION ||
+            (params.fix_legacy_typing_correction_behavior() &&
+             (result.candidate_attributes &
+              Segment::Candidate::TYPING_CORRECTION)));
+  };
+
+  if (!is_typing_correction(*top_result)) {
     return;
   }
 
@@ -651,29 +543,39 @@ void DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection2(
   for (int i = 1; i < max_size; ++i) {
     const Result *result = (*results)[i];
     // Finds the first non-typing-corrected candidate.
-    if (!(result->types & PredictionType::TYPING_CORRECTION)) {
-      // Replace the literal with top when the cost is close enough or
-      // force_literal_on_top is true.
-      if (force_literal_on_top) {
-        promote_result(i, 0);
-      } else if (literal_at_least_second && i >= 2) {
-        // Moves the literal to the second position even when
-        // literal-on-top condition doesn't match.
-        promote_result(i, 1);
-      }
-      break;
+    if (is_typing_correction(*result)) {
+      continue;
     }
+    // Replace the literal with top when the cost is close enough or
+    // force_literal_on_top is true.
+    if (force_literal_on_top) {
+      promote_result(i, 0);
+    } else if (literal_at_least_second && i >= 2) {
+      // Moves the literal to the second position even when
+      // literal-on-top condition doesn't match.
+      promote_result(i, 1);
+    }
+    break;
   }
 }
 
 // static
-void DictionaryPredictor::MaybeApplyHomonymCorrection(
-    const engine::Modules &modules, Segments *segments) {
-  const engine::SpellcheckerInterface *spellchecker = modules.GetSpellchecker();
-  if (spellchecker == nullptr) {
+void DictionaryPredictor::MaybeApplyPostCorrection(
+    const ConversionRequest &request, const engine::Modules &modules,
+    Segments *segments) {
+  // b/363902660:
+  // Stop applying post correction when typing correction is disabled.
+  // We may want to use other conditions if we want to enable post correction
+  // separately.
+  if (!IsTypingCorrectionEnabled(request)) {
     return;
   }
-  spellchecker->MaybeApplyHomonymCorrection(segments);
+  const engine::SupplementalModelInterface *supplemental_model =
+      modules.GetSupplementalModel();
+  if (supplemental_model == nullptr) {
+    return;
+  }
+  supplemental_model->PostCorrect(request, segments);
 }
 
 int DictionaryPredictor::CalculateSingleKanjiCostOffset(
@@ -757,10 +659,6 @@ DictionaryPredictor::ResultFilter::ResultFilter(
   strings::Assign(history_key_, history.key);
   strings::Assign(history_value_, history.value);
   exact_bigram_key_ = absl::StrCat(history.key, input_key_);
-
-  const auto &experiment_params = request.request().decoder_experiment_params();
-  tc_max_count_ = experiment_params.typing_correction_max_count();
-  tc_max_rank_ = experiment_params.typing_correction_max_rank();
 
   suffix_count_ = 0;
   predictive_count_ = 0;
@@ -867,10 +765,14 @@ bool DictionaryPredictor::ResultFilter::ShouldRemove(const Result &result,
     *log_message = "Added realtime >= 3 || added >= 5";
     return true;
   }
+
+  constexpr int kTcMaxCount = 3;
+  constexpr int kTcMaxRank = 10;
+
   if ((result.types & PredictionType::TYPING_CORRECTION) &&
-      (tc_count_++ >= tc_max_count_ || added_num >= tc_max_rank_)) {
-    *log_message = absl::StrCat("Added typing correction >= ", tc_max_count_,
-                                " || added >= ", tc_max_rank_);
+      (tc_count_++ >= kTcMaxCount || added_num >= kTcMaxRank)) {
+    *log_message = absl::StrCat("Added typing correction >= ", kTcMaxCount,
+                                " || added >= ", kTcMaxRank);
     return true;
   }
   if ((result.types & PredictionType::PREFIX) &&
@@ -991,7 +893,16 @@ std::string DictionaryPredictor::GetPredictionTypeDebugString(
     debug_desc.append(1, 'E');
   }
   if (types & PredictionType::TYPING_CORRECTION) {
-    debug_desc.append("T");
+    debug_desc.append(1, 'T');
+  }
+  if (types & PredictionType::TYPING_COMPLETION) {
+    debug_desc.append(1, 'C');
+  }
+  if (types & PredictionType::SUPPLEMENTAL_MODEL) {
+    debug_desc.append(1, 'X');
+  }
+  if (types & PredictionType::KANA_MODIFIER_EXPANDED) {
+    debug_desc.append(1, 'K');
   }
   return debug_desc;
 }
@@ -1101,7 +1012,7 @@ void DictionaryPredictor::SetPredictionCost(
     // have the same reading (key), they should have the same cost bonus
     // from the length part. This implies that the result is reranked by
     // the language model probability as long as the key part is the same.
-    // This behavior is baisically the same as the converter.
+    // This behavior is basically the same as the converter.
     //
     // TODO(team): want find the best parameter instead of kCostFactor.
     constexpr int kCostFactor = 500;
@@ -1187,7 +1098,7 @@ void DictionaryPredictor::SetPredictionCostForMixedConversion(
       cost += (kDefaultTransitionCost - kBigramBonus - prev_cost);
       // The bonus can make the cost negative and promotes bigram results
       // too much.
-      // Align the cost here bofore applying other cost modifications.
+      // Align the cost here before applying other cost modifications.
       cost = std::max(1, cost);
       MOZC_WORD_LOG(result, absl::StrCat("Bigram: ", cost));
     }
@@ -1253,11 +1164,7 @@ void DictionaryPredictor::SetPredictionCostForMixedConversion(
     MOZC_WORD_LOG(result, absl::StrCat("SetPredictionCost: ", result.cost));
   }
 
-  if (request.request()
-          .decoder_experiment_params()
-          .apply_user_segment_history_rewriter_for_prediction()) {
-    MaybeFixRealtimeTopCost(input_key, *results);
-  }
+  MaybeFixRealtimeTopCost(input_key, *results);
 }
 
 // static
@@ -1428,16 +1335,20 @@ int DictionaryPredictor::CalculatePrefixPenalty(
 void DictionaryPredictor::MaybeRescoreResults(
     const ConversionRequest &request, const Segments &segments,
     absl::Span<Result> results) const {
-  const RescorerInterface *const rescorer = modules_.GetRescorer();
-  if (rescorer == nullptr) return;
   if (request_util::IsHandwriting(request)) {
     // We want to fix the first candidate for handwriting request.
     return;
   }
+
   if (IsDebug(request)) {
     for (Result &r : results) r.cost_before_rescoring = r.cost;
   }
-  rescorer->RescoreResults(request, segments, results);
+
+  if (const engine::SupplementalModelInterface *const supplemental_model =
+          modules_.GetSupplementalModel();
+      supplemental_model != nullptr) {
+    supplemental_model->RescoreResults(request, segments, results);
+  }
 }
 
 void DictionaryPredictor::AddRescoringDebugDescription(Segments *segments) {
@@ -1496,9 +1407,11 @@ std::shared_ptr<Result> DictionaryPredictor::MaybeGetPreviousTopResult(
   // 2. cost diff is less than max_diff.
   // 3. current key is shorter than previous key.
   // 4. current key is the prefix of previous key.
+  // 5. current result is not a partial suggestion.
   if (prev_top_result && cur_top_key_length > prev_top_key_length &&
       std::abs(current_top_result.cost - prev_top_result->cost) < max_diff &&
       current_top_result.key.size() < prev_top_result->key.size() &&
+      !(current_top_result.types & PREFIX) &&
       absl::StartsWith(prev_top_result->key, current_top_result.key)) {
     // Do not need to remember the previous key as `prev_top_result` is still
     // top result.
@@ -1510,6 +1423,27 @@ std::shared_ptr<Result> DictionaryPredictor::MaybeGetPreviousTopResult(
                     std::make_shared<Result>(current_top_result));
 
   return nullptr;
+}
+
+// Computes the typing correction mixing params.
+// from the `literal_result` and `typing_corrected_results`
+TypingCorrectionMixingParams
+DictionaryPredictor::GetTypingCorrectionMixingParams(
+    const ConversionRequest &request, const Segments &segments,
+    absl::Span<const Result> literal_results,
+    absl::Span<const Result> typing_corrected_results) const {
+  TypingCorrectionMixingParams typing_correction_mixing_params;
+
+  const engine::SupplementalModelInterface *supplemental_model =
+      modules_.GetSupplementalModel();
+
+  if (supplemental_model) {
+    typing_correction_mixing_params.literal_on_top =
+        supplemental_model->ShouldRevertTypingCorrection(
+            request, segments, literal_results, typing_corrected_results);
+  }
+
+  return typing_correction_mixing_params;
 }
 
 }  // namespace mozc::prediction

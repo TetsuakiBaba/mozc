@@ -40,6 +40,8 @@
 #include <vector>
 
 #include "absl/hash/hash.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -47,7 +49,6 @@
 #include "absl/types/span.h"
 #include "base/clock.h"
 #include "base/japanese_util.h"
-#include "base/logging.h"
 #include "base/strings/assign.h"
 #include "base/strings/unicode.h"
 #include "base/util.h"
@@ -528,7 +529,7 @@ void Composer::SetCompositionsForHandwriting(
   }
 }
 
-const std::vector<commands::SessionCommand::CompositionEvent> &
+absl::Span<const commands::SessionCommand::CompositionEvent>
 Composer::GetHandwritingCompositions() const {
   return compositions_for_handwriting_;
 }

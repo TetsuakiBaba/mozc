@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
@@ -48,7 +49,6 @@
 #include "converter/immutable_converter_interface.h"
 #include "converter/segmenter.h"
 #include "converter/segments.h"
-#include "data_manager/data_manager_interface.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/single_kanji_dictionary.h"
 #include "engine/modules.h"
@@ -81,14 +81,6 @@ struct TypingCorrectionMixingParams {
   // When the literal candidate is already at the top, do nothing.
   bool literal_at_least_second = false;
 };
-
-// Computes the typing correction mixing params.
-// from the `base_result` and `typing_corrected_results`.
-// TODO(taku): Introduces more advanced algorithms to make better decision.
-TypingCorrectionMixingParams GetTypingCorrectionMixingParams(
-    const ConversionRequest &request, const Segments &segments,
-    absl::Span<const Result> base_results,
-    absl::Span<const Result> typing_corrected_results);
 
 // Dictionary-based predictor
 class DictionaryPredictor : public PredictorInterface {
@@ -144,9 +136,6 @@ class DictionaryPredictor : public PredictorInterface {
     std::string history_value_;
     std::string exact_bigram_key_;
 
-    int tc_max_count_;
-    int tc_max_rank_;
-
     int suffix_count_;
     int predictive_count_;
     int realtime_count_;
@@ -177,6 +166,13 @@ class DictionaryPredictor : public PredictorInterface {
       dictionary_predictor_internal::KeyValueView key_value,
       const absl::flat_hash_map<std::string, int32_t> &merged_types,
       Segment::Candidate *candidate) const;
+
+  // Computes the typing correction mixing params.
+  // from the `base_result` and `typing_corrected_results`.
+  TypingCorrectionMixingParams GetTypingCorrectionMixingParams(
+      const ConversionRequest &request, const Segments &segments,
+      absl::Span<const Result> literal_results,
+      absl::Span<const Result> typing_corrected_results) const;
 
   // Returns the position of misspelled character position.
   //
@@ -295,18 +291,18 @@ class DictionaryPredictor : public PredictorInterface {
       const ConversionRequest &request, const Segments &segments,
       std::vector<Result> *results) const;
 
-  static void MaybeSuppressAggressiveTypingCorrection(
-      const ConversionRequest &request,
-      const TypingCorrectionMixingParams &typing_correction_mixing_params,
-      Segments *segments);
+  void MaybeRerankAggressiveTypingCorrection(
+      const ConversionRequest &request, const Segments &segments,
+      std::vector<absl::Nonnull<const Result *>> *results) const;
 
-  static void MaybeSuppressAggressiveTypingCorrection2(
+  static void MaybeSuppressAggressiveTypingCorrection(
       const ConversionRequest &request,
       const TypingCorrectionMixingParams &typing_correction_mixing_params,
       std::vector<absl::Nonnull<const Result *>> *results);
 
-  static void MaybeApplyHomonymCorrection(const engine::Modules &modules,
-                                          Segments *segments);
+  static void MaybeApplyPostCorrection(const ConversionRequest &request,
+                                       const engine::Modules &modules,
+                                       Segments *segments);
 
   void MaybeRescoreResults(const ConversionRequest &request,
                            const Segments &segments,
@@ -343,7 +339,6 @@ class DictionaryPredictor : public PredictorInterface {
   const dictionary::PosMatcher pos_matcher_;
   const uint16_t general_symbol_id_;
   const std::string predictor_name_;
-  const prediction::RescorerInterface *rescorer_ = nullptr;
   const engine::Modules &modules_;
 };
 

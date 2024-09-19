@@ -35,12 +35,14 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/file/temp_dir.h"
 #include "base/file_stream.h"
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "dictionary/file/codec_factory.h"
 #include "dictionary/file/codec_interface.h"
 #include "dictionary/file/section.h"
@@ -74,7 +76,7 @@ class CodecTest : public ::testing::Test {
   }
 
   bool FindSection(const DictionaryFileCodecInterface *codec,
-                   const std::vector<DictionaryFileSection> &sections,
+                   absl::Span<const DictionaryFileSection> sections,
                    const absl::string_view name, int *index) const {
     CHECK(codec);
     CHECK(index);
@@ -99,7 +101,7 @@ class CodecTest : public ::testing::Test {
 
 class CodecMock : public DictionaryFileCodecInterface {
  public:
-  void WriteSections(const std::vector<DictionaryFileSection> &sections,
+  void WriteSections(absl::Span<const DictionaryFileSection> sections,
                      std::ostream *ofs) const override {
     const std::string value = "placeholder value";
     ofs->write(value.data(), value.size());

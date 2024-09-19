@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
@@ -48,7 +49,6 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "base/container/serialized_string_array.h"
-#include "base/logging.h"
 #include "base/mmap.h"
 #include "base/version.h"
 #include "base/vlog.h"
@@ -161,6 +161,16 @@ DataManager::Status DataManager::InitFromArray(absl::string_view array,
                                                absl::string_view magic) {
   DataSetReader reader;
   if (!reader.Init(array, magic)) {
+    LOG(ERROR) << "Binary data of size " << array.size() << " is broken";
+    return DataManager::Status::DATA_BROKEN;
+  }
+  return InitFromReader(reader);
+}
+
+DataManager::Status DataManager::InitFromArray(absl::string_view array,
+                                               size_t magic_length) {
+  DataSetReader reader;
+  if (!reader.Init(array, magic_length)) {
     LOG(ERROR) << "Binary data of size " << array.size() << " is broken";
     return DataManager::Status::DATA_BROKEN;
   }

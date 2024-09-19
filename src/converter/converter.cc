@@ -177,11 +177,12 @@ bool ExtractLastTokenWithScriptType(const absl::string_view text,
   std::vector<char32_t> reverse_last_token;
   Util::ScriptType last_script_type_found = Util::GetScriptType(iter.Get());
   for (; !iter.Done(); iter.Next()) {
-    const char32_t w = iter.Get();
-    if ((w == ' ') || (Util::GetScriptType(w) != last_script_type_found)) {
+    const char32_t codepoint = iter.Get();
+    if ((codepoint == ' ') ||
+        (Util::GetScriptType(codepoint) != last_script_type_found)) {
       break;
     }
-    reverse_last_token.push_back(w);
+    reverse_last_token.push_back(codepoint);
   }
 
   *last_script_type = last_script_type_found;
@@ -557,8 +558,24 @@ void Converter::RevertConversion(Segments *segments) const {
   if (segments->revert_entries_size() == 0) {
     return;
   }
+  rewriter_->Revert(segments);
   predictor_->Revert(segments);
   segments->clear_revert_entries();
+}
+
+bool Converter::DeleteCandidateFromHistory(const Segments &segments,
+                                           size_t segment_index,
+                                           int candidate_index) const {
+  DCHECK_LT(segment_index, segments.segments_size());
+  const Segment &segment = segments.segment(segment_index);
+  DCHECK(segment.is_valid_index(candidate_index));
+  const Segment::Candidate &candidate = segment.candidate(candidate_index);
+  bool result = false;
+  result |=
+      rewriter_->ClearHistoryEntry(segments, segment_index, candidate_index);
+  result |= predictor_->ClearHistoryEntry(candidate.key, candidate.value);
+
+  return result;
 }
 
 bool Converter::ReconstructHistory(
@@ -660,8 +677,8 @@ bool Converter::FocusSegmentValue(Segments *segments, size_t segment_index,
   return rewriter_->Focus(segments, segment_index, candidate_index);
 }
 
-bool Converter::CommitSegments(
-    Segments *segments, const std::vector<size_t> &candidate_index) const {
+bool Converter::CommitSegments(Segments *segments,
+                               absl::Span<const size_t> candidate_index) const {
   const size_t conversion_segment_index = segments->history_segments_size();
   for (size_t i = 0; i < candidate_index.size(); ++i) {
     // 2nd argument must always be 0 because on each iteration

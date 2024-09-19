@@ -27,25 +27,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MOZC_PREDICTION_RESCORER_MOCK_H_
-#define MOZC_PREDICTION_RESCORER_MOCK_H_
+#ifndef MOZC_BASE_PROTOBUF_CODED_STREAM_H_
+#define MOZC_BASE_PROTOBUF_CODED_STREAM_H_
 
-#include "absl/types/span.h"
-#include "converter/segments.h"
-#include "prediction/rescorer_interface.h"
-#include "request/conversion_request.h"
-#include "testing/gmock.h"
+#include "base/protobuf/protobuf.h"  // IWYU pragma: keep
 
-namespace mozc::prediction {
+#include "google/protobuf/io/coded_stream.h"       // IWYU pragma: export
 
-class MockRescorer : public RescorerInterface {
- public:
-  MOCK_METHOD(void, RescoreResults,
-              (const ConversionRequest &request, const Segments &segments,
-               absl::Span<Result> results),
-              (const override));
-};
-
-}  // namespace mozc::prediction
-
-#endif  // MOZC_PREDICTION_RESCORER_MOCK_H_
+#endif  // MOZC_BASE_PROTOBUF_CODED_STREAM_H_

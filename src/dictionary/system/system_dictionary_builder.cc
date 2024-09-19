@@ -45,13 +45,15 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/file_stream.h"
 #include "base/file_util.h"
 #include "base/japanese_util.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "dictionary/dictionary_token.h"
@@ -98,7 +100,7 @@ void WriteSectionToFile(const DictionaryFileSection &section,
 }  // namespace
 
 void SystemDictionaryBuilder::BuildFromTokens(
-    const std::vector<std::unique_ptr<Token>> &tokens) {
+    absl::Span<const std::unique_ptr<Token>> tokens) {
   std::vector<Token *> ptrs;
   ptrs.reserve(tokens.size());
   for (const std::unique_ptr<Token> &token : tokens) {
@@ -342,8 +344,8 @@ void SystemDictionaryBuilder::SetIdForValue(KeyInfoList *key_info_list) const {
 
 void SystemDictionaryBuilder::SortTokenInfo(KeyInfoList *key_info_list) const {
   for (KeyInfo &key_info : *key_info_list) {
-    std::sort(key_info.tokens.begin(), key_info.tokens.end(),
-              TokenGreaterThan());
+    std::stable_sort(key_info.tokens.begin(), key_info.tokens.end(),
+                     TokenGreaterThan());
   }
 }
 

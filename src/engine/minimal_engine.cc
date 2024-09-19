@@ -29,11 +29,13 @@
 
 #include "engine/minimal_engine.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "base/strings/assign.h"
@@ -61,10 +63,6 @@ class UserDataManagerStub : public UserDataManagerInterface {
   bool ClearUserHistory() override { return true; }
   bool ClearUserPrediction() override { return true; }
   bool ClearUnusedUserPrediction() override { return true; }
-  bool ClearUserPredictionEntry(const absl::string_view key,
-                                const absl::string_view value) override {
-    return true;
-  }
   bool Wait() override { return true; }
 };
 
@@ -167,6 +165,12 @@ class MinimalConverter : public ConverterInterface {
 
   void RevertConversion(Segments *segments) const override {}
 
+  bool DeleteCandidateFromHistory(const Segments &segments,
+                                  size_t segment_index,
+                                  int candidate_index) const {
+    return true;
+  }
+
   bool ReconstructHistory(
       Segments *segments,
       const absl::string_view preceding_text) const override {
@@ -190,9 +194,8 @@ class MinimalConverter : public ConverterInterface {
     return true;
   }
 
-  bool CommitSegments(
-      Segments *segments,
-      const std::vector<size_t> &candidate_index) const override {
+  bool CommitSegments(Segments *segments,
+                      absl::Span<const size_t> candidate_index) const override {
     return true;
   }
 

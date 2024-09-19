@@ -30,11 +30,12 @@
 #ifndef MOZC_REWRITER_MERGER_REWRITER_H_
 #define MOZC_REWRITER_MERGER_REWRITER_H_
 
+#include <cstddef>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "config/config_handler.h"
+#include "absl/log/check.h"
 #include "converter/segments.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -126,6 +127,22 @@ class MergerRewriter : public RewriterInterface {
     for (const std::unique_ptr<RewriterInterface> &rewriter : rewriters_) {
       rewriter->Finish(request, segments);
     }
+  }
+
+  void Revert(Segments *segments) override {
+    for (const std::unique_ptr<RewriterInterface> &rewriter : rewriters_) {
+      rewriter->Revert(segments);
+    }
+  }
+
+  bool ClearHistoryEntry(const Segments &segments, size_t segment_index,
+                         int candidate_index) override {
+    bool result = false;
+    for (const std::unique_ptr<RewriterInterface> &rewriter : rewriters_) {
+      result |=
+          rewriter->ClearHistoryEntry(segments, segment_index, candidate_index);
+    }
+    return result;
   }
 
   // Syncs internal data to local file system.

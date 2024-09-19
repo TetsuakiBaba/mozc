@@ -36,7 +36,7 @@ load(
     "mozc_cc_library",
     "mozc_cc_test",
 )
-load("//bazel:stubs.bzl", "lexan")
+load("//bazel:stubs.bzl", "windows")
 load(
     "//bazel/win32:build_defs.bzl",
     "features_gdi",
@@ -48,6 +48,7 @@ mozc_cc_binary(
     linkshared = True,
     tags = MOZC_TAGS.WIN_ONLY,
     target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//win32/installer:__subpackages__"],
     win_def_file = "mozc_tip.def",
     deps = [
         ":mozc_tip_resource",
@@ -68,7 +69,7 @@ mozc_cc_binary(
     ],
 )
 
-lexan.resource_files(
+windows.resource_files(
     name = "mozc_tip_resource",
     rc_files = [
         "tip_resource.rc",
@@ -141,7 +142,6 @@ mozc_cc_library(
         "//base:const",
         "//base:file_util",
         "//base:log_file",
-        "//base:logging",
         "//base:process",
         "//base:system_util",
         "//base:update_util",
@@ -150,11 +150,12 @@ mozc_cc_library(
         "//base/win32:hresult",
         "//base/win32:hresultor",
         "//protocol:commands_cc_proto",
-        "//win32/base:msctf_dll",
+        "//win32/base:msctf_dll",  # buildcleaner: keep
         "//win32/base:win32_window_util",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -214,7 +215,6 @@ mozc_cc_library(
         ":tip_surrounding_text",
         ":tip_text_service",
         ":tip_thread_context",
-        "//base:logging",
         "//base/win32:wide_char",
         "//client:client_interface",
         "//protocol:commands_cc_proto",
@@ -224,6 +224,8 @@ mozc_cc_library(
         "//win32/base:keyboard",
         "//win32/base:keyevent_handler",
         "//win32/base:surrogate_pair_observer",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -268,11 +270,11 @@ mozc_cc_library(
         ":tip_lang_bar_callback",
         ":tip_lang_bar_menu",
         ":tip_resource",
-        "//base:logging",
         "//base/win32:com",
         "//base/win32:hresultor",
         "//protocol:commands_cc_proto",
-        "//win32/base:msctf_dll",
+        "//win32/base:msctf_dll",  # buildcleaner: keep
+        "@com_google_absl//absl/log",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -419,13 +421,13 @@ mozc_cc_library(
         ":tip_private_context_h",
         ":tip_resource",
         ":tip_text_service",
-        "//base:logging",
         "//base/win32:com",
         "//base/win32:wide_char",
         "//protocol:candidates_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -528,15 +530,15 @@ mozc_cc_library(
         ":tip_thread_context",
         ":tip_ui_element_manager",
         ":tip_ui_handler",
-        "//base:logging",
         "//base:system_util",
-        "//base:util",
         "//base/win32:com",
+        "//base/win32:wide_char",
         "//protocol:candidates_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer/win32:win32_renderer_client",
         "//win32/base:input_state",
+        "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -582,10 +584,8 @@ mozc_cc_library(
         ":tip_text_service",
         ":tip_thread_context",
         ":tip_ui_handler",
-        "//base:logging",
         "//base:util",
         "//base/win32:com",
-        "//base/win32:hresultor",
         "//base/win32:wide_char",
         "//client:client_interface",
         "//protocol:candidates_cc_proto",
@@ -594,6 +594,7 @@ mozc_cc_library(
         "//win32/base:deleter",
         "//win32/base:input_state",
         "//win32/base:string_util",
+        "@com_google_absl//absl/log:check",
         "@com_microsoft_wil//:wil",
     ],
 )
@@ -639,6 +640,7 @@ mozc_cc_library(
         "//win32/base:conversion_mode_util",
         "//win32/base:indicator_visibility_tracker",
         "//win32/base:keyboard",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

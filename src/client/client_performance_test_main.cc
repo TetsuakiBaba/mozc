@@ -28,7 +28,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
-#include <climits>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +44,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -52,7 +52,6 @@
 #include "base/file_stream.h"
 #include "base/init_mozc.h"
 #include "base/japanese_util.h"
-#include "base/logging.h"
 #include "base/singleton.h"
 #include "base/stopwatch.h"
 #include "base/util.h"
@@ -75,7 +74,7 @@ struct Result {
 
 class TestSentenceGenerator {
  public:
-  const std::vector<std::vector<commands::KeyEvent>> &GetTestKeys() const {
+  absl::Span<const std::vector<commands::KeyEvent>> GetTestKeys() const {
     return keys_;
   }
 
@@ -160,7 +159,7 @@ class TestScenarioInterface {
   commands::Output output_;
 };
 
-std::string GetBasicStats(const std::vector<absl::Duration> &times) {
+std::string GetBasicStats(absl::Span<const absl::Duration> times) {
   std::vector<uint64_t> temp;
   temp.resize(times.size());
   absl::c_transform(times, temp.begin(), absl::ToInt64Microseconds);
@@ -192,7 +191,7 @@ std::string GetBasicStats(const std::vector<absl::Duration> &times) {
 class PreeditCommon : public TestScenarioInterface {
  protected:
   virtual void RunTest(Result *result) {
-    const std::vector<std::vector<commands::KeyEvent>> &keys =
+    absl::Span<const std::vector<commands::KeyEvent>> keys =
         Singleton<TestSentenceGenerator>::get()->GetTestKeys();
     for (size_t i = 0; i < keys.size(); ++i) {
       for (int j = 0; j < keys[i].size(); ++j) {
@@ -341,7 +340,7 @@ class Conversion : public TestScenarioInterface {
     DisableSuggestion();
     IMEOn();
 
-    const std::vector<std::vector<commands::KeyEvent>> &keys =
+    absl::Span<const std::vector<commands::KeyEvent>> keys =
         Singleton<TestSentenceGenerator>::get()->GetTestKeys();
     for (size_t i = 0; i < keys.size(); ++i) {
       for (int j = 0; j < keys[i].size(); ++j) {

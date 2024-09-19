@@ -35,7 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -197,6 +197,11 @@ class SessionConverter : public SessionConverterInterface {
 
   // Reverts the last "Commit" operation
   void Revert() override;
+
+  // Delete candidate from user input history.
+  // Try to delete the current selected candidate if |id| is not specified.
+  // Returns false if the candidate was not found or deletion failed.
+  bool DeleteCandidateFromHistory(std::optional<int> id) override;
 
   // Moves the focus of segments.
   void SegmentFocusRight() override;

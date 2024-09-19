@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/strings/unicode.h"
 #include "composer/composer.h"
 #include "composer/table.h"
@@ -45,7 +46,6 @@
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "request/request_test_util.h"
-#include "testing/gmock.h"
 #include "testing/gunit.h"
 
 namespace mozc::prediction {
@@ -59,7 +59,7 @@ void SetUpInputWithKey(absl::string_view key, composer::Composer *composer,
   seg->set_segment_type(Segment::FREE);
 }
 
-bool FindResultByKey(const std::vector<Result> &results,
+bool FindResultByKey(absl::Span<const Result> results,
                      const absl::string_view key) {
   for (const auto &result : results) {
     if (result.key == key && !result.removed) {

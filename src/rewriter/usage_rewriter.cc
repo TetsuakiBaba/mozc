@@ -27,18 +27,19 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <cstdint>
+#include "rewriter/usage_rewriter.h"
 
-#include "absl/strings/string_view.h"
 #ifndef NO_USAGE_REWRITER
-
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 
+#include "absl/log/check.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "base/container/serialized_string_array.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "converter/segments.h"
@@ -47,7 +48,6 @@
 #include "dictionary/pos_matcher.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
-#include "rewriter/usage_rewriter.h"
 
 namespace mozc {
 
@@ -73,8 +73,12 @@ UsageRewriter::UsageRewriter(const DataManagerInterface *data_manager,
   const uint32_t *conjugation_suffix_data_index =
       reinterpret_cast<const uint32_t *>(conjugation_suffix_index_data.data());
 
-  DCHECK(SerializedStringArray::VerifyData(string_array_data));
-  string_array_.Set(string_array_data);
+  if (SerializedStringArray::VerifyData(string_array_data)) {
+    string_array_.Set(string_array_data);
+  } else {
+    // \0\0\0\0 is the header value of the data size.
+    string_array_.Set({"\0\0\0\0", 4});
+  }
 
   UsageDictItemIterator begin(usage_items_data.data());
   UsageDictItemIterator end(usage_items_data.data() + usage_items_data.size());
@@ -110,19 +114,19 @@ std::string UsageRewriter::GetKanjiPrefixAndOneHiragana(
   bool has_kanji = false;
   bool has_hiragana = false;
   for (ConstChar32Iterator iter(word); !iter.Done(); iter.Next()) {
-    const char32_t w = iter.Get();
-    const Util::ScriptType s = Util::GetScriptType(w);
+    const char32_t codepoint = iter.Get();
+    const Util::ScriptType s = Util::GetScriptType(codepoint);
     if (pos == 0 && s != Util::KANJI) {
       return "";
     } else if (pos >= 0 && pos <= 1 && s == Util::KANJI) {
       // length of kanji <= 2.
       has_kanji = true;
       ++pos;
-      Util::CodepointToUtf8Append(w, &result);
+      Util::CodepointToUtf8Append(codepoint, &result);
       continue;
     } else if (pos > 0 && s == Util::HIRAGANA) {
       has_hiragana = true;
-      Util::CodepointToUtf8Append(w, &result);
+      Util::CodepointToUtf8Append(codepoint, &result);
       break;
     } else {
       return "";

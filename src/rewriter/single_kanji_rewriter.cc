@@ -35,11 +35,14 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
-#include "base/logging.h"
+#include "absl/types/span.h"
 #include "base/strings/assign.h"
 #include "base/vlog.h"
 #include "converter/segments.h"
+#include "data_manager/data_manager_interface.h"
 #include "data_manager/serialized_dictionary.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/single_kanji_dictionary.h"
@@ -198,7 +201,7 @@ void SingleKanjiRewriter::AddDescriptionForExistingCandidates(
 // Insert SingleKanji into segment.
 bool SingleKanjiRewriter::InsertCandidate(
     bool is_single_segment, uint16_t single_kanji_id,
-    const std::vector<std::string> &kanji_list, Segment *segment) const {
+    absl::Span<const std::string> kanji_list, Segment *segment) const {
   DCHECK(segment);
   DCHECK(!kanji_list.empty());
   if (segment->candidates_size() == 0) {

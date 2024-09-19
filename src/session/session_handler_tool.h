@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,7 @@ class SessionHandlerTool {
   bool DeleteSession();
   bool CleanUp();
   bool ClearUserPrediction();
+  bool ClearUserHistory();
   bool SendKey(const commands::KeyEvent &key, commands::Output *output) {
     return SendKeyWithOption(key, commands::Input::default_instance(), output);
   }
@@ -81,12 +83,17 @@ class SessionHandlerTool {
   bool Reload();
   bool ResetContext();
   bool UndoOrRewind(commands::Output *output);
+  // Try to delete the candidate from the history.
+  // The target candidate is specified with the |id|. If |id| is not specified,
+  // the current focused candidate will be specified.
+  bool DeleteCandidateFromHistory(std::optional<int> id,
+                                  commands::Output *output);
   bool SwitchInputMode(commands::CompositionMode composition_mode);
   bool SetRequest(const commands::Request &request, commands::Output *output);
   bool SetConfig(const config::Config &config, commands::Output *output);
   bool SyncData();
   void SetCallbackText(absl::string_view text);
-  bool ReloadSpellchecker(absl::string_view model_path);
+  bool ReloadSupplementalModel(absl::string_view model_path);
 
  private:
   bool EvalCommand(commands::Input *input, commands::Output *output);
@@ -122,7 +129,7 @@ class SessionHandlerInterpreter final {
   std::vector<std::string> Parse(absl::string_view line);
   absl::Status Eval(absl::Span<const std::string> args);
   void SetRequest(const commands::Request &request);
-  void ReloadSpellchecker(absl::string_view model_path);
+  void ReloadSupplementalModel(absl::string_view model_path);
 
  private:
   std::unique_ptr<SessionHandlerTool> client_;

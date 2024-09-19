@@ -89,7 +89,6 @@ def cc_stub(name, tags = None, target_compatible_with = None, **kwargs):
         target_compatible_with = target_compatible_with,
     )
 
-lexan = struct(
+windows = struct(
     resource_files = cc_stub,
-    cc_windows_dll = cc_stub,
 )

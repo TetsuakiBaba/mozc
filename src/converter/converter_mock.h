@@ -32,7 +32,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -81,6 +80,8 @@ class StrictMockConverter : public ConverterInterface {
   MOCK_METHOD(void, CancelConversion, (Segments * segments), (const, override));
   MOCK_METHOD(void, ResetConversion, (Segments * segments), (const, override));
   MOCK_METHOD(void, RevertConversion, (Segments * segments), (const, override));
+  MOCK_METHOD(bool, DeleteCandidateFromHistory, (const Segments &, size_t, int),
+              (const));
   MOCK_METHOD(bool, ReconstructHistory,
               (Segments * segments, absl::string_view preceding_text),
               (const, override));
@@ -96,7 +97,7 @@ class StrictMockConverter : public ConverterInterface {
               (Segments * segments, size_t segment_index, int candidate_index),
               (const, override));
   MOCK_METHOD(bool, CommitSegments,
-              (Segments * segments, const std::vector<size_t> &candidate_index),
+              (Segments * segments, absl::Span<const size_t> candidate_index),
               (const, override));
   MOCK_METHOD(bool, ResizeSegment,
               (Segments * segments, const ConversionRequest &request,

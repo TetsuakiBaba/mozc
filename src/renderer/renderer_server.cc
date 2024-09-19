@@ -35,11 +35,10 @@
 #include <string>
 
 #include "absl/flags/flag.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "base/const.h"
-#include "base/logging.h"
 #include "base/system_util.h"
 #include "base/vlog.h"
 #include "client/client_interface.h"
@@ -54,6 +53,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+
+#include "base/const.h"
 #include "base/win32/win_util.h"
 #endif  // _WIN32
 
@@ -163,15 +164,14 @@ RendererServer::RendererServer()
                   std::min(absl::GetFlag(FLAGS_timeout), 60));
   }
 
-  timeout_ =
-      1000 * std::max(3, std::min(24 * 60 * 60, absl::GetFlag(FLAGS_timeout)));
+  timeout_ = 1000 * std::clamp(absl::GetFlag(FLAGS_timeout), 3, 24 * 60 * 60);
   MOZC_VLOG(2) << "timeout is set to be : " << timeout_;
 
-#ifndef MOZC_NO_LOGGING
+#ifndef NDEBUG
   config::Config config;
   config::ConfigHandler::GetConfig(&config);
   mozc::internal::SetConfigVLogLevel(config.verbose_level());
-#endif  // MOZC_NO_LOGGING
+#endif  // NDEBUG
 }
 
 RendererServer::~RendererServer() = default;

@@ -29,15 +29,16 @@
 
 #include "dictionary/user_dictionary_session_handler.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/file_util.h"
-#include "base/protobuf/protobuf.h"
-#include "base/protobuf/repeated_field.h"
+#include "base/protobuf/repeated_ptr_field.h"
 #include "base/system_util.h"
 #include "protocol/user_dictionary_storage.pb.h"
 #include "testing/gmock.h"
@@ -154,7 +155,7 @@ class UserDictionarySessionHandlerTest
 
   RepeatedPtrField<UserDictionary::Entry> GetUserDictionaryEntries(
       uint64_t session_id, uint64_t dictionary_id,
-      const std::vector<int> &indices) {
+      absl::Span<const int> indices) {
     Clear();
     command_->set_type(UserDictionaryCommand::GET_ENTRIES);
     command_->set_session_id(session_id);

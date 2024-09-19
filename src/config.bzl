@@ -35,6 +35,8 @@
 
 BRANDING = "Mozc"
 
+BAZEL_TOOLS_PREFIX = "@bazel_tools"
+
 LINUX_MOZC_BROWSER_COMMAND = "/usr/bin/xdg-open"
 LINUX_MOZC_ICONS_DIR = "/usr/share/icons/mozc"
 LINUX_MOZC_SERVER_DIR = "/usr/lib/mozc"
@@ -49,6 +51,15 @@ EMACS_MOZC_HELPER_DIR = "/usr/bin"
 MACOS_BUNDLE_ID_PREFIX = "org.mozc.inputmethod.Japanese"
 MACOS_MIN_OS_VER = "11.0"
 
+# identity for codesign. The value passed to the --sign option of the codesign command.
+#
+# pseudo identity for local development
+# '-' means pseudo identity.
+# https://github.com/bazelbuild/rules_apple/blob/3.5.1/apple/internal/codesigning_support.bzl#L42
+# https://developer.apple.com/documentation/security/seccodesignatureflags/1397793-adhoc
+MACOS_CODESIGN_IDENTITY_PSEUDO = "-"
+MACOS_CODESIGN_IDENTITY = MACOS_CODESIGN_IDENTITY_PSEUDO
+
 ## Qt path for macOS
 # The paths are the default paths of Qt 6.5.2 installed by "make install".
 #
@@ -56,3 +67,9 @@ MACOS_MIN_OS_VER = "11.0"
 #
 # For Linux, Qt paths are managed by pkg_config_repository in WORKSPACE.bazel.
 MACOS_QT_PATH = "/usr/local/Qt-6.5.2"
+
+## SHA256 of zip code files.
+# When zip code files are prefetched and used via --repository_cache for offline build,
+# SHA256 values should be specified.
+SHA256_ZIP_CODE_KEN_ALL = None
+SHA256_ZIP_CODE_JIGYOSYO = None

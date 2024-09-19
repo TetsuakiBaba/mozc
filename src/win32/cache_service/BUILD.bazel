@@ -36,7 +36,7 @@ load(
     "mozc_cc_binary",
     "mozc_cc_library",
 )
-load("//bazel:stubs.bzl", "lexan")
+load("//bazel:stubs.bzl", "windows")
 
 package(default_visibility = ["//:__subpackages__"])
 
@@ -54,7 +54,7 @@ mozc_cc_binary(
     ],
 )
 
-lexan.resource_files(
+windows.resource_files(
     name = "mozc_cache_service_resources",
     manifests = [
         "mozc_cache_service.exe.manifest",
@@ -77,11 +77,12 @@ mozc_cc_library(
         ":win32_service_state_cc_proto",
         "//base:const",
         "//base:file_util",
-        "//base:logging",
         "//base:system_util",
-        "//base/protobuf",
+        "//base/protobuf:message",
         "//base/win32:wide_char",
         "//bazel/win32:crypt32",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

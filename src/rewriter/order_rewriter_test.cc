@@ -34,6 +34,7 @@
 
 #include "converter/segments.h"
 #include "converter/segments_matchers.h"
+#include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
 #include "request/request_test_util.h"
 #include "rewriter/rewriter_interface.h"
@@ -124,6 +125,17 @@ Segments BuildTestSegments() {
 
 TEST_F(OrderRewriterTest, NotAvailable) {
   Segments segments = BuildTestSegments();
+  EXPECT_FALSE(rewriter_->Rewrite(convreq_, &segments));
+}
+
+TEST_F(OrderRewriterTest, DoNotRewriteNwp) {
+  Segments segments = BuildTestSegments();
+  segments.mutable_conversion_segment(0)->set_key("");
+  request_test_util::FillMobileRequest(&request_);
+  request_.mutable_decoder_experiment_params()
+      ->set_enable_findability_oriented_order(true);
+  request_.mutable_decoder_experiment_params()
+      ->set_findability_oriented_order_top_size(5);
   EXPECT_FALSE(rewriter_->Rewrite(convreq_, &segments));
 }
 

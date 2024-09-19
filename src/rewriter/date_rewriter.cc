@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,6 +63,7 @@
 #include "base/clock.h"
 #include "base/japanese_util.h"
 #include "base/number_util.h"
+#include "base/strings/unicode.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
@@ -552,27 +554,37 @@ bool AdToEraForCourt(const YearData *data, int size, int year,
 constexpr absl::string_view kNenKey = "ねん";
 constexpr absl::string_view kNenValue = "年";
 
+std::string GetDescription(absl::string_view era, absl::string_view year,
+                           bool should_add_suffix) {
+  return should_add_suffix ? absl::StrCat(era, year, kNenValue)
+                           : absl::StrCat(era, year);
+}
+
 bool ExtractYearFromKey(const YearData &year_data, const absl::string_view key,
-                        int *year, std::string *description) {
+                        int *year, bool *has_suffix_out,
+                        std::string *description) {
   constexpr absl::string_view kGanKey = "がん";
   constexpr absl::string_view kGanValue = "元";
 
-  // absl::EndsWith(key, kNenKey) is expected to always return true
-  DCHECK(absl::EndsWith(key, kNenKey));
   if (!absl::StartsWith(key, year_data.key)) {
     return false;
   }
+
+  // Append the `kNenValue` if the `key` has the `kNenKey` suffix.
+  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  *has_suffix_out = has_suffix;
+
   // key="しょうわ59ねん" -> era_year_str="59"
   // key="へいせいがんねん" -> era_year_str="がん"
   const size_t year_start = Util::CharsLen(year_data.key);
-  const size_t year_length =
-      Util::CharsLen(key) - year_start - Util::CharsLen(kNenKey);
+  const size_t year_length = Util::CharsLen(key) - year_start -
+                             (has_suffix ? Util::CharsLen(kNenKey) : 0);
   const absl::string_view era_year_str =
       Util::Utf8SubString(key, year_start, year_length);
 
   if (era_year_str == kGanKey) {
     *year = 1;
-    *description = absl::StrCat(year_data.era, kGanValue, kNenValue);
+    *description = GetDescription(year_data.era, kGanValue, has_suffix);
     return true;
   }
 
@@ -583,7 +595,7 @@ bool ExtractYearFromKey(const YearData &year_data, const absl::string_view key,
   if (*year <= 0) {
     return false;
   }
-  *description = absl::StrCat(year_data.era, era_year_str, kNenValue);
+  *description = GetDescription(year_data.era, era_year_str, has_suffix);
 
   return true;
 }
@@ -592,10 +604,6 @@ void EraToAdForCourt(const YearData *data, size_t size,
                      const absl::string_view key,
                      std::vector<std::pair<std::string, std::string>>
                          &results_and_descriptions) {
-  if (!absl::EndsWith(key, kNenKey)) {
-    return;
-  }
-
   for (size_t i = 0; i < size; ++i) {
     const YearData &year_data = data[i];
     if (!absl::StartsWith(key, year_data.key)) {
@@ -605,8 +613,10 @@ void EraToAdForCourt(const YearData *data, size_t size,
     // key="しょうわ59ねん" -> era_year=59, description="昭和59年"
     // key="へいせいがんねん" -> era_year=1, description="平成元年"
     int era_year = 0;
+    bool has_suffix = false;
     std::string description;
-    if (!ExtractYearFromKey(year_data, key, &era_year, &description)) {
+    if (!ExtractYearFromKey(year_data, key, &era_year, &has_suffix,
+                            &description)) {
       continue;
     }
     const int ad_year = era_year + year_data.ad - 1;
@@ -622,7 +632,10 @@ void EraToAdForCourt(const YearData *data, size_t size,
 
     for (size_t j = 0; j < output.size(); ++j) {
       // "元徳", "建武" and "明徳" require dedupe
-      std::string value = absl::StrCat(output[j].value, kNenValue);
+      std::string value = output[j].value;
+      if (has_suffix) {
+        value.append(kNenValue);
+      }
       if (absl::c_find_if(results_and_descriptions,
                           [&value](const std::pair<std::string, std::string>
                                        &result_and_description) {
@@ -950,7 +963,8 @@ std::vector<std::string> GetConversions(const DateRewriter::DateData &data,
 }  // namespace
 
 bool DateRewriter::RewriteDate(Segment *segment,
-                               const absl::string_view extra_format) {
+                               const absl::string_view extra_format,
+                               size_t &num_done_out) {
   const std::string &key = segment->key();
   auto rit = std::find_if(std::begin(kDateData), std::end(kDateData),
                           [&key](auto data) { return key == data.key; });
@@ -989,59 +1003,58 @@ bool DateRewriter::RewriteDate(Segment *segment,
 
   // Date candidates are too many, therefore highest candidate show at most 3rd.
   // TODO(nona): learn date candidate even if the date is changed.
-  constexpr size_t kMinIdx = 3;
-  size_t insert_idx = std::min(std::max(kMinIdx, cand_idx + 1), end_idx);
+  const size_t min_idx = std::min<size_t>(3, end_idx);
+  const size_t insert_idx = std::clamp(cand_idx + 1, min_idx, end_idx);
   segment->insert_candidates(insert_idx, std::move(candidates));
+  num_done_out = 1;
   return true;
 }
 
-size_t DateRewriter::RewriteEra(Segments::range segments_range) {
-  if (segments_range.size() < 2) {
-    return 0;
-  }
-  Segment &current_segment = segments_range.front();
-  const Segment &next_segment = segments_range[1];
-  if (current_segment.candidates_size() <= 0 ||
-      next_segment.candidates_size() <= 0) {
-    LOG(ERROR) << "Candidate size is 0";
-    return 0;
-  }
-
-  const std::string &current_key = current_segment.key();
-  const std::string &next_value = next_segment.candidate(0).value;
-
-  if (next_value != "年") {
-    return 0;
+bool DateRewriter::RewriteEra(Segments::range segments_range,
+                              size_t &num_done_out) {
+  // Rewrite:
+  // * If the first segment ends with the `kNenKey`, or
+  // * If the second segment starts with the `kNenKey`.
+  Segment &segment = segments_range.front();
+  absl::string_view key = segment.key();
+  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  if (has_suffix) {
+    key.remove_suffix(kNenKey.size());
+  } else if (segments_range.size() < 2 ||
+             !absl::StartsWith(segments_range[1].key(), kNenKey)) {
+    return false;
   }
 
-  if (Util::GetScriptType(current_key) != Util::NUMBER) {
-    return 0;
+  if (Util::GetScriptType(key) != Util::NUMBER) {
+    return false;
   }
 
-  const size_t len = Util::CharsLen(current_key);
+  const size_t len = Util::CharsLen(key);
   if (len < 3 || len > 4) {
     LOG(WARNING) << "Too long year";
-    return 0;
+    return false;
   }
 
-  std::string year_str =
-      japanese_util::FullWidthAsciiToHalfWidthAscii(current_key);
+  std::string year_str = japanese_util::FullWidthAsciiToHalfWidthAscii(key);
 
   uint32_t year = 0;
   if (!absl::SimpleAtoi(year_str, &year)) {
-    return 0;
+    return false;
   }
 
   std::vector<std::string> results;
   if (!AdToEra(year, 0, /* unknown month */ &results)) {
-    return 0;
+    return false;
   }
 
   constexpr absl::string_view kDescription = "和暦";
-  const Segment::Candidate &base_cand = current_segment.candidate(0);
+  const Segment::Candidate &base_cand = segment.candidate(0);
   std::vector<std::unique_ptr<Segment::Candidate>> candidates;
   candidates.reserve(results.size());
   for (std::string &value : results) {
+    if (has_suffix) {
+      value.append(kNenValue);
+    }
     std::unique_ptr<Segment::Candidate> candidate =
         CreateCandidate(base_cand, std::move(value), std::string(kDescription));
     candidate->attributes &= ~Segment::Candidate::NO_VARIANTS_EXPANSION;
@@ -1049,15 +1062,25 @@ size_t DateRewriter::RewriteEra(Segments::range segments_range) {
   }
 
   constexpr int kInsertPosition = 2;
-  current_segment.insert_candidates(kInsertPosition, std::move(candidates));
+  segment.insert_candidates(kInsertPosition, std::move(candidates));
 
-  return 2;  // Consumed 2 segments.
+  num_done_out = has_suffix ? 1 : 2;
+  return true;
 }
 
-bool DateRewriter::RewriteAd(Segment *segment) {
+bool DateRewriter::RewriteAd(Segments::range segments_range,
+                             size_t &num_done_out) {
+  // Rewrite:
+  // * If the first segment ends with the `kNenKey`, or
+  // * If the second segment starts with the `kNenKey`.
+  Segment *segment = &segments_range.front();
   const std::string &key = segment->key();
-  if (!absl::EndsWith(key, kNenKey)) {
-    return false;
+  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  if (!has_suffix) {
+    if (segments_range.size() < 2 ||
+        !absl::StartsWith(segments_range[1].key(), kNenKey)) {
+      return false;
+    }
   }
   if (segment->candidates_size() == 0) {
     LOG(WARNING) << "No candidates are found";
@@ -1082,6 +1105,7 @@ bool DateRewriter::RewriteAd(Segment *segment) {
   // Insert position is the last of candidates
   const int position = static_cast<int>(segment->candidates_size());
   segment->insert_candidates(position, std::move(candidates));
+  num_done_out = has_suffix ? 1 : 2;
   return true;
 }
 
@@ -1117,6 +1141,11 @@ bool DateRewriter::ResizeSegmentsForRewriteAd(
   for (const Segment &segment : segments_range) {
     const absl::string_view key{segment.key()};
     if (auto pos = key.find(kNenKey); pos != absl::string_view::npos) {
+      if (pos == 0 && keys.size() == 1) {
+        // If the second key starts with the `kNenKey`, `RewriteAd()` can handle
+        // it without resizing.
+        return false;
+      }
       pos += kNenKey.size();
       if (pos == key.size()) {
         keys.push_back(key);
@@ -1167,9 +1196,27 @@ bool DateRewriter::ResizeSegments(const ConversionRequest &request,
 }
 
 namespace {
-bool IsNDigits(const absl::string_view value, int n) {
-  return Util::CharsLen(value) == n &&
-         Util::GetScriptType(value) == Util::NUMBER;
+std::optional<std::string> VaridateNDigits(absl::string_view value, int n) {
+  static_assert(U'9' - U'0' == 9);
+  static_assert(U'９' - U'０' == 9);
+  std::u32string u32value = strings::Utf8ToUtf32(value);
+  if (u32value.size() != n) {
+    return std::nullopt;
+  }
+
+  for (int i = 0; i < n; ++i) {
+    const char32_t c = u32value[i];
+    if (U'0' <= c && c <= U'9') {  // Half-width digits
+      continue;
+    }
+    if (U'０' <= c && c <= U'９') {  // Full-width digits
+      // Sets `u32value[i]` to the half-width digts of `c`.
+      u32value[i] = (c - U'０' + U'0');
+      continue;
+    }
+    return std::nullopt;
+  }
+  return strings::Utf32ToUtf8(u32value);
 }
 
 // Gets n digits if possible.
@@ -1184,24 +1231,22 @@ bool IsNDigits(const absl::string_view value, int n) {
 //      - All the meta candidates are based on "cd" (e.g. "CD", "Cd").
 //      Therefore to get "2223" we should access the raw input.
 // Prerequisite: |segments| has only one conversion segment.
-bool GetNDigits(const composer::Composer &composer, const Segments &segments,
-                int n, std::string *output) {
-  DCHECK(output);
-  DCHECK_EQ(1, segments.conversion_segments_size());
+std::optional<std::string> GetNDigits(const composer::Composer &composer,
+                                      const Segments &segments, int n) {
+  DCHECK_EQ(segments.conversion_segments_size(), 1);
   const Segment &segment = segments.conversion_segment(0);
+  std::optional<std::string> validated;
 
   // 1. Segment's key
-  if (IsNDigits(segment.key(), n)) {
-    *output = japanese_util::FullWidthAsciiToHalfWidthAscii(segment.key());
-    return true;
+  if (validated = VaridateNDigits(segment.key(), n); validated) {
+    return validated.value();
   }
 
   // 2. Meta candidates
   for (size_t i = 0; i < segment.meta_candidates_size(); ++i) {
-    if (IsNDigits(segment.meta_candidate(i).value, n)) {
-      *output = japanese_util::FullWidthAsciiToHalfWidthAscii(
-          segment.meta_candidate(i).value);
-      return true;
+    if (validated = VaridateNDigits(segment.meta_candidate(i).value, n);
+        validated) {
+      return validated.value();
     }
   }
 
@@ -1211,15 +1256,13 @@ bool GetNDigits(const composer::Composer &composer, const Segments &segments,
   // the whole composition.
   const std::string raw =
       composer.GetRawSubString(0, Util::CharsLen(segment.key()));
-  if (IsNDigits(raw, n)) {
-    *output = japanese_util::FullWidthAsciiToHalfWidthAscii(raw);
-    return true;
+  if (validated = VaridateNDigits(raw, n); validated) {
+    return validated.value();
   }
 
   // No trials succeeded.
-  return false;
+  return std::nullopt;
 }
-
 }  // namespace
 
 bool DateRewriter::RewriteConsecutiveDigits(const composer::Composer &composer,
@@ -1242,18 +1285,18 @@ bool DateRewriter::RewriteConsecutiveDigits(const composer::Composer &composer,
   }
 
   // Generate candidates.  The results contain <candidate, description> pairs.
-  std::string number_str;
+  std::optional<std::string> number_str;
   std::vector<DateCandidate> results;
-  if (GetNDigits(composer, *segments, 2, &number_str)) {
-    if (!RewriteConsecutiveTwoDigits(number_str, &results)) {
+  if (number_str = GetNDigits(composer, *segments, 2); number_str) {
+    if (!RewriteConsecutiveTwoDigits(number_str.value(), &results)) {
       return false;
     }
-  } else if (GetNDigits(composer, *segments, 3, &number_str)) {
-    if (!RewriteConsecutiveThreeDigits(number_str, &results)) {
+  } else if (number_str = GetNDigits(composer, *segments, 3); number_str) {
+    if (!RewriteConsecutiveThreeDigits(number_str.value(), &results)) {
       return false;
     }
-  } else if (GetNDigits(composer, *segments, 4, &number_str)) {
-    if (!RewriteConsecutiveFourDigits(number_str, &results)) {
+  } else if (number_str = GetNDigits(composer, *segments, 4); number_str) {
+    if (!RewriteConsecutiveFourDigits(number_str.value(), &results)) {
       return false;
     }
   }
@@ -1282,7 +1325,7 @@ bool DateRewriter::RewriteConsecutiveDigits(const composer::Composer &composer,
 
 bool DateRewriter::RewriteConsecutiveTwoDigits(
     absl::string_view str, std::vector<DateCandidate> *results) {
-  DCHECK_EQ(2, str.size());
+  DCHECK_EQ(str.size(), 2);
   const auto orig_size = results->size();
   const uint32_t high = static_cast<uint32_t>(str[0] - '0');
   const uint32_t low = static_cast<uint32_t>(str[1] - '0');
@@ -1303,7 +1346,7 @@ bool DateRewriter::RewriteConsecutiveTwoDigits(
 
 bool DateRewriter::RewriteConsecutiveThreeDigits(
     absl::string_view str, std::vector<DateCandidate> *results) {
-  DCHECK_EQ(3, str.size());
+  DCHECK_EQ(str.size(), 3);
   const auto orig_size = results->size();
 
   const uint32_t n[] = {static_cast<uint32_t>(str[0] - '0'),
@@ -1371,7 +1414,7 @@ bool DateRewriter::RewriteConsecutiveThreeDigits(
 
 bool DateRewriter::RewriteConsecutiveFourDigits(
     absl::string_view str, std::vector<DateCandidate> *results) {
-  DCHECK_EQ(4, str.size());
+  DCHECK_EQ(str.size(), 4);
   const auto orig_size = results->size();
 
   const uint32_t high = (10 * static_cast<uint32_t>(str[0] - '0') +
@@ -1489,14 +1532,9 @@ bool DateRewriter::Rewrite(const ConversionRequest &request,
       return true;
     }
 
-    if (RewriteAd(seg) || RewriteDate(seg, extra_format)) {
-      modified = true;
-      num_done = 1;
-      continue;
-    }
-
-    num_done = RewriteEra(rest_segments);
-    if (num_done) {
+    if (RewriteAd(rest_segments, num_done) ||
+        RewriteDate(seg, extra_format, num_done) ||
+        RewriteEra(rest_segments, num_done)) {
       modified = true;
       continue;
     }

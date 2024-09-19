@@ -29,6 +29,7 @@
 
 #include "converter/quality_regression_util.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <sstream>  // NOLINT
@@ -37,6 +38,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -44,8 +46,8 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/file_stream.h"
-#include "base/logging.h"
 #include "base/number_util.h"
 #include "base/text_normalizer.h"
 #include "base/util.h"
@@ -219,7 +221,7 @@ absl::Status QualityRegressionUtil::ParseFile(const std::string &filename,
 
 // static
 absl::Status QualityRegressionUtil::ParseFiles(
-    const std::vector<std::string> &filenames, std::vector<TestItem> *outputs) {
+    absl::Span<const std::string> filenames, std::vector<TestItem> *outputs) {
   outputs->clear();
   for (const std::string &filename : filenames) {
     const absl::Status result = ParseFileInternal(filename, outputs);
@@ -263,6 +265,9 @@ absl::StatusOr<bool> QualityRegressionUtil::ConvertAndTest(
     composer::Composer composer(&table, &request_, &config_);
     composer.SetPreeditTextForTestOnly(key);
     ConversionRequest conv_req(&composer, &request_, &config_);
+    if (request_.mixed_conversion()) {
+      conv_req.set_create_partial_candidates(true);
+    }
     if (!converter_->StartPrediction(conv_req, &segments_)) {
       return absl::UnknownError(absl::StrCat(
           "StartPredictionForRequest failed: ", item.OutputAsTSV()));

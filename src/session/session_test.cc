@@ -37,11 +37,11 @@
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "base/logging.h"
 #include "base/strings/assign.h"
 #include "base/strings/unicode.h"
 #include "base/vlog.h"
@@ -56,7 +56,6 @@
 #include "engine/engine.h"
 #include "engine/engine_mock.h"
 #include "engine/mock_data_engine_factory.h"
-#include "engine/user_data_manager_mock.h"
 #include "protocol/candidates.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -1591,6 +1590,24 @@ TEST_F(SessionTest, Transliterations) {
   EXPECT_SINGLE_SEGMENT("jishin", command);
 }
 
+TEST_F(SessionTest, TransliterationOfNegativeNumber) {
+  MockConverter converter;
+  MockEngine engine;
+  EXPECT_CALL(engine, GetConverter()).WillRepeatedly(Return(&converter));
+
+  Session session(&engine);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterChars("-255", &session, &command);
+  // "－" (U+FF0D) is used as a minus sign in Windows.
+  EXPECT_TRUE(EnsureSingleSegment("−２５５", command) ||  // "−" is U+2212
+              EnsureSingleSegment("－２５５", command));  // "－" is U+FF0D
+
+  command.Clear();
+  session.TranslateHalfASCII(&command);
+  EXPECT_SINGLE_SEGMENT("-255", command);
+}
+
 TEST_F(SessionTest, ConvertToTransliteration) {
   MockConverter converter;
   MockEngine engine;
@@ -1630,6 +1647,37 @@ TEST_F(SessionTest, ConvertToTransliteration) {
   command.Clear();
   session.ConvertToHalfASCII(&command);
   EXPECT_SINGLE_SEGMENT("jishin", command);
+}
+
+TEST_F(SessionTest, ConvertToTransliterationOfNegativeNumber) {
+  MockConverter converter;
+  MockEngine engine;
+  EXPECT_CALL(engine, GetConverter()).WillRepeatedly(Return(&converter));
+
+  Session session(&engine);
+  InitSessionToPrecomposition(&session);
+  commands::Command command;
+  InsertCharacterChars("-789", &session, &command);
+
+  Segments segments;
+  Segment *segment = segments.add_segment();
+  segment->set_key("−７８９");
+  Segment::Candidate *candidate = segment->add_candidate();
+  candidate->value = "−７８９";
+
+  ConversionRequest request;
+  SetComposer(&session, &request);
+  FillT13Ns(request, &segments);
+  EXPECT_CALL(converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+
+  command.Clear();
+  session.ConvertToHalfASCII(&command);
+  EXPECT_SINGLE_SEGMENT("-789", command);
+
+  command.Clear();
+  session.ConvertToHalfASCII(&command);
+  EXPECT_SINGLE_SEGMENT("-789", command);
 }
 
 TEST_F(SessionTest, ConvertToTransliterationWithMultipleSegments) {
@@ -9907,12 +9955,7 @@ TEST_F(SessionTest, DeleteHistory) {
 
   // Do DeleteHistory command. After that, the session should be back in
   // composition state and preedit gets back to "でｌ" again.
-  MockUserDataManager user_data_manager;
-  EXPECT_CALL(engine, GetUserDataManager())
-      .WillOnce(Return(&user_data_manager));
-  EXPECT_CALL(user_data_manager,
-              ClearUserPredictionEntry(absl::string_view(),
-                                       absl::string_view("DeleteHistory")))
+  EXPECT_CALL(converter, DeleteCandidateFromHistory(_, 0, 0))
       .WillOnce(Return(true));
   EXPECT_TRUE(SendKey("Ctrl Delete", &session, &command));
   EXPECT_EQ(session.context().state(), ImeContext::COMPOSITION);
@@ -10171,11 +10214,8 @@ TEST_F(SessionTest, MakeSureIMEOffWithCommitComposition) {
 
 TEST_F(SessionTest, DeleteCandidateFromHistory) {
   MockConverter converter;
-  MockUserDataManager user_data_manager;
   MockEngine engine;
   EXPECT_CALL(engine, GetConverter()).WillRepeatedly(Return(&converter));
-  EXPECT_CALL(engine, GetUserDataManager())
-      .WillRepeatedly(Return(&user_data_manager));
 
   // InitSessionToConversionWithAiueo initializes candidates as follows:
   // 0:あいうえお, 1:アイウエオ, -3:aiueo, -4:AIUEO, ...
@@ -10184,24 +10224,20 @@ TEST_F(SessionTest, DeleteCandidateFromHistory) {
     Session session(&engine);
     InitSessionToConversionWithAiueo(&session, &converter);
 
-    EXPECT_CALL(user_data_manager,
-                ClearUserPredictionEntry(absl::string_view("あいうえお"),
-                                         absl::string_view("あいうえお")))
+    EXPECT_CALL(converter, DeleteCandidateFromHistory(_, 0, 0))
         .WillOnce(Return(true));
 
     commands::Command command;
     session.DeleteCandidateFromHistory(&command);
 
-    Mock::VerifyAndClearExpectations(&user_data_manager);
+    Mock::VerifyAndClearExpectations(&converter);
   }
   {
     // A test case to delete candidate by ID.
     Session session(&engine);
     InitSessionToConversionWithAiueo(&session, &converter);
 
-    EXPECT_CALL(user_data_manager,
-                ClearUserPredictionEntry(absl::string_view("あいうえお"),
-                                         absl::string_view("アイウエオ")))
+    EXPECT_CALL(converter, DeleteCandidateFromHistory(_, 0, 1))
         .WillOnce(Return(true));
 
     commands::Command command;
@@ -10210,7 +10246,7 @@ TEST_F(SessionTest, DeleteCandidateFromHistory) {
     command.mutable_input()->mutable_command()->set_id(1);
     session.DeleteCandidateFromHistory(&command);
 
-    Mock::VerifyAndClearExpectations(&user_data_manager);
+    Mock::VerifyAndClearExpectations(&converter);
   }
 }
 

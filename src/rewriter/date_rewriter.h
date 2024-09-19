@@ -101,6 +101,9 @@ class DateRewriter : public RewriterInterface {
   //   "しょうわ2ねん"  -> {{"1927年", "昭和2年"}, {"１９２７年", "昭和2年"},
   //                       {"一九二七年", "昭和2年"}, {"1313年", "正和2年"},
   //                       {"１３１３年", "正和2年"}, {"一三一三年", "正和2年"}}
+  //
+  // The `年` suffix is appended to the reuslts if the `key` has the `ねん`
+  // suffix, but it's omitted otherwise.
   static std::vector<std::pair<std::string, std::string>> EraToAd(
       absl::string_view key);
 
@@ -147,10 +150,13 @@ class DateRewriter : public RewriterInterface {
   static constexpr char kExtraFormatKey[] = "DATE_FORMAT";
 
  private:
-  static bool RewriteDate(Segment *segment, absl::string_view extra_format);
-  // Returns the number of segments processed.
-  static size_t RewriteEra(Segments::range segments_range);
-  static bool RewriteAd(Segment *segment);
+  // If the rewrite is done, returns `true` and sets the `num_done_out` to the
+  // number of segments processed. The `num_done_out` is not modified if the
+  // rewrite is not done.
+  static bool RewriteDate(Segment *segment, absl::string_view extra_format,
+                          size_t &num_done_out);
+  static bool RewriteEra(Segments::range segments_range, size_t &num_done_out);
+  static bool RewriteAd(Segments::range segments_range, size_t &num_done_out);
   bool ResizeSegmentsForRewriteAd(const ConversionRequest &request,
                                   Segments::const_range segments_range,
                                   Segments *segments) const;

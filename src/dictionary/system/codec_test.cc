@@ -29,15 +29,17 @@
 
 #include "dictionary/system/codec.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/random/distributions.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "base/logging.h"
+#include "absl/types/span.h"
 #include "base/random.h"
 #include "base/util.h"
 #include "dictionary/dictionary_token.h"
@@ -334,7 +336,7 @@ class SystemDictionaryCodecMock : public SystemDictionaryCodecInterface {
                    std::string *dst) const override {}
   void DecodeValue(const absl::string_view src,
                    std::string *dst) const override {}
-  void EncodeTokens(const std::vector<TokenInfo> &tokens,
+  void EncodeTokens(absl::Span<const TokenInfo> tokens,
                     std::string *output) const override {}
   void DecodeTokens(const uint8_t *ptr,
                     std::vector<TokenInfo> *tokens) const override {}

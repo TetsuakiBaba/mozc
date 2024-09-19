@@ -41,7 +41,9 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/util.h"
 #include "composer/composer.h"
 #include "composer/table.h"
@@ -71,6 +73,7 @@
 #include "prediction/user_history_predictor.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
+#include "protocol/user_dictionary_storage.pb.h"
 #include "request/conversion_request.h"
 #include "request/request_test_util.h"
 #include "rewriter/rewriter.h"
@@ -161,6 +164,27 @@ class InsertPlaceholderWordsRewriter : public RewriterInterface {
 };
 
 }  // namespace
+
+class MockPredictor : public mozc::prediction::PredictorInterface {
+ public:
+  MockPredictor() = default;
+  ~MockPredictor() override = default;
+
+  MOCK_METHOD(bool, PredictForRequest, (const ConversionRequest &, Segments *),
+              (const, override));
+  MOCK_METHOD(void, Revert, (Segments *), (override));
+  MOCK_METHOD(const std::string &, GetPredictorName, (), (const, override));
+};
+
+class MockRewriter : public RewriterInterface {
+ public:
+  MockRewriter() = default;
+  ~MockRewriter() override = default;
+
+  MOCK_METHOD(bool, Rewrite, (const ConversionRequest &, Segments *),
+              (const, override));
+  MOCK_METHOD(void, Revert, (Segments *), (override));
+};
 
 class ConverterTest : public testing::TestWithTempUserProfile {
  protected:
@@ -284,7 +308,7 @@ class ConverterTest : public testing::TestWithTempUserProfile {
 
   std::unique_ptr<ConverterAndData>
   CreateConverterAndDataWithUserDefinedEntries(
-      const std::vector<UserDefinedEntry> &user_defined_entries,
+      absl::Span<const UserDefinedEntry> user_defined_entries,
       PredictorType predictor_type) {
     auto converter_and_data = std::make_unique<ConverterAndData>();
     auto data_manager = std::make_unique<testing::MockDataManager>();
@@ -1142,14 +1166,18 @@ TEST_F(ConverterTest, PredictSetKey) {
 
 // An action that invokes a DictionaryInterface::Callback with the token whose
 // key and value is set to the given ones.
-ACTION_P2(InvokeCallbackWithUserDictionaryToken, key, value) {
-  // const absl::string_view key = arg0;
-  DictionaryInterface::Callback *const callback = arg2;
-  const Token token(std::string(key), value, MockDictionary::kDefaultCost,
-                    MockDictionary::kDefaultPosId,
-                    MockDictionary::kDefaultPosId, Token::USER_DICTIONARY);
-  callback->OnToken(key, key, token);
-}
+struct InvokeCallbackWithUserDictionaryToken {
+  template <class T, class U>
+  void operator()(T, U, DictionaryInterface::Callback *callback) {
+    const Token token(key, value, MockDictionary::kDefaultCost,
+                      MockDictionary::kDefaultPosId,
+                      MockDictionary::kDefaultPosId, Token::USER_DICTIONARY);
+    callback->OnToken(key, key, token);
+  }
+
+  std::string key;
+  std::string value;
+};
 
 TEST_F(ConverterTest, VariantExpansionForSuggestion) {
   // Create Converter with mock user dictionary
@@ -1157,11 +1185,11 @@ TEST_F(ConverterTest, VariantExpansionForSuggestion) {
   EXPECT_CALL(*mock_user_dictionary, LookupPredictive(_, _, _))
       .Times(AnyNumber());
   EXPECT_CALL(*mock_user_dictionary, LookupPredictive(StrEq("てすと"), _, _))
-      .WillRepeatedly(InvokeCallbackWithUserDictionaryToken("てすと", "<>!?"));
+      .WillRepeatedly(InvokeCallbackWithUserDictionaryToken{"てすと", "<>!?"});
 
   EXPECT_CALL(*mock_user_dictionary, LookupPrefix(_, _, _)).Times(AnyNumber());
   EXPECT_CALL(*mock_user_dictionary, LookupPrefix(StrEq("てすとの"), _, _))
-      .WillRepeatedly(InvokeCallbackWithUserDictionaryToken("てすと", "<>!?"));
+      .WillRepeatedly(InvokeCallbackWithUserDictionaryToken{"てすと", "<>!?"});
 
   engine::Modules modules;
   modules.PresetUserDictionary(std::move(mock_user_dictionary));
@@ -1870,6 +1898,7 @@ TEST_F(ConverterTest, DoNotAddOverlappingNodesForPrediction) {
       engine->GetDataManager()->GetPosMatcherData());
   ConversionRequest conversion_request(&composer, &request, &config);
   conversion_request.set_request_type(ConversionRequest::PREDICTION);
+  conversion_request.set_create_partial_candidates(true);
 
   Segments segments;
   // History segment.
@@ -1889,6 +1918,33 @@ TEST_F(ConverterTest, DoNotAddOverlappingNodesForPrediction) {
 
   EXPECT_TRUE(converter->StartPrediction(conversion_request, &segments));
   EXPECT_FALSE(FindCandidateByValue("て廃", segments.conversion_segment(0)));
+}
+
+TEST_F(ConverterTest, RevertConversion) {
+  auto mock_predictor = absl::make_unique<MockPredictor>();
+  auto mock_rewriter = absl::make_unique<MockRewriter>();
+  auto converter_and_data = std::make_unique<ConverterAndData>();
+
+  EXPECT_CALL(*mock_predictor, Revert(_)).Times(1);
+  EXPECT_CALL(*mock_rewriter, Revert(_)).Times(1);
+
+  engine::Modules &modules = converter_and_data->modules;
+  modules.PresetUserDictionary(std::make_unique<UserDictionaryStub>());
+  CHECK_OK(modules.Init(std::make_unique<testing::MockDataManager>()));
+
+  converter_and_data->immutable_converter =
+      std::make_unique<ImmutableConverter>(modules);
+  converter_and_data->converter = std::make_unique<Converter>();
+
+  converter_and_data->converter->Init(
+      modules, std::move(mock_predictor), std::move(mock_rewriter),
+      converter_and_data->immutable_converter.get());
+
+  ConverterInterface *converter = converter_and_data->converter.get();
+  Segments segments;
+  segments.push_back_revert_entry();
+
+  converter->RevertConversion(&segments);
 }
 
 }  // namespace mozc

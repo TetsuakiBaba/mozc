@@ -34,15 +34,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "base/clock.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "composer/composer.h"
 #include "composer/key_event_util.h"
@@ -2331,22 +2333,11 @@ bool Session::ToggleAlphanumericMode(commands::Command *command) {
 }
 
 bool Session::DeleteCandidateFromHistory(commands::Command *command) {
-  const Segment::Candidate *cand = nullptr;
+  std::optional<int> id = std::nullopt;
   if (command->input().has_command() && command->input().command().has_id()) {
-    cand =
-        context_->converter().GetCandidateById(command->input().command().id());
-  } else {
-    cand = context_->converter().GetSelectedCandidateOfFocusedSegment();
+    id = command->input().command().id();
   }
-
-  if (!cand) {
-    LOG(WARNING) << "No candidate is selected.";
-    return DoNothing(command);
-  }
-  UserDataManagerInterface *manager = engine_->GetUserDataManager();
-  if (!manager->ClearUserPredictionEntry(cand->key, cand->value)) {
-    DLOG(WARNING) << "Cannot delete non-history candidate or deletion failed: "
-                  << cand->DebugString();
+  if (!context_->mutable_converter()->DeleteCandidateFromHistory(id)) {
     return DoNothing(command);
   }
   return ConvertCancel(command);

@@ -35,7 +35,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
@@ -104,6 +103,11 @@ class Converter final : public ConverterInterface {
   void RevertConversion(Segments *segments) const override;
 
   ABSL_MUST_USE_RESULT
+  bool DeleteCandidateFromHistory(const Segments &segments,
+                                  size_t segment_index,
+                                  int candidate_index) const override;
+
+  ABSL_MUST_USE_RESULT
   bool ReconstructHistory(Segments *segments,
                           absl::string_view preceding_text) const override;
 
@@ -119,9 +123,8 @@ class Converter final : public ConverterInterface {
   bool FocusSegmentValue(Segments *segments, size_t segment_index,
                          int candidate_index) const override;
   ABSL_MUST_USE_RESULT
-  bool CommitSegments(
-      Segments *segments,
-      const std::vector<size_t> &candidate_index) const override;
+  bool CommitSegments(Segments *segments,
+                      absl::Span<const size_t> candidate_index) const override;
   ABSL_MUST_USE_RESULT bool ResizeSegment(Segments *segments,
                                           const ConversionRequest &request,
                                           size_t segment_index,

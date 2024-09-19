@@ -36,10 +36,11 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/config_file_stream.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "composer/key_event_util.h"
 #include "composer/key_parser.h"
@@ -121,7 +122,7 @@ std::vector<KeyInformation> KeyInfoUtil::ExtractSortedDirectModeKeys(
   return ExtractSortedDirectModeKeysFromFile(keymap_file);
 }
 
-bool KeyInfoUtil::ContainsKey(const std::vector<KeyInformation> &sorted_keys,
+bool KeyInfoUtil::ContainsKey(absl::Span<const KeyInformation> sorted_keys,
                               const commands::KeyEvent &key_event) {
   KeyInformation key_info;
   if (!KeyEventUtil::GetKeyInformation(key_event, &key_info)) {

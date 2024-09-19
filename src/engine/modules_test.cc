@@ -32,15 +32,12 @@
 #include <memory>
 #include <utility>
 
-#include "absl/status/status.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_mock.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/suppression_dictionary.h"
 #include "dictionary/user_dictionary_stub.h"
-#include "prediction/rescorer_interface.h"
-#include "prediction/rescorer_mock.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 
@@ -56,7 +53,6 @@ TEST(ModulesTest, Init) {
   EXPECT_EQ(modules.GetSegmenter(), nullptr);
   EXPECT_EQ(modules.GetUserDictionary(), nullptr);
   EXPECT_EQ(modules.GetPosGroup(), nullptr);
-  EXPECT_EQ(modules.GetRescorer(), nullptr);
 
   ASSERT_OK(modules.Init(std::make_unique<testing::MockDataManager>()));
 
@@ -66,8 +62,6 @@ TEST(ModulesTest, Init) {
   EXPECT_NE(modules.GetSegmenter(), nullptr);
   EXPECT_NE(modules.GetUserDictionary(), nullptr);
   EXPECT_NE(modules.GetPosGroup(), nullptr);
-  // Rescorer is not initialized by MockDataManager.
-  EXPECT_EQ(modules.GetRescorer(), nullptr);
 }
 
 TEST(ModulesTest, Preset) {
@@ -107,12 +101,6 @@ TEST(ModulesTest, Preset) {
   EXPECT_NE(dictionary_ptr, nullptr);
   modules.PresetDictionary(std::move(dictionary));
 
-  // Rescorer
-  auto rescorer = std::make_unique<prediction::MockRescorer>();
-  const prediction::RescorerInterface *rescorer_ptr = rescorer.get();
-  EXPECT_NE(rescorer_ptr, nullptr);
-  modules.PresetRescorer(std::move(rescorer));
-
   ASSERT_OK(modules.Init(std::make_unique<testing::MockDataManager>()));
 
   EXPECT_EQ(modules.GetPosMatcher(), pos_matcher_ptr);
@@ -120,7 +108,6 @@ TEST(ModulesTest, Preset) {
   EXPECT_EQ(modules.GetUserDictionary(), user_dictionary_ptr);
   EXPECT_EQ(modules.GetSuffixDictionary(), suffix_dictionary_ptr);
   EXPECT_EQ(modules.GetDictionary(), dictionary_ptr);
-  EXPECT_EQ(modules.GetRescorer(), rescorer_ptr);
 }
 
 }  // namespace engine

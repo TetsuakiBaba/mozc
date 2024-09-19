@@ -45,7 +45,6 @@
 #include "absl/random/random.h"
 #include "absl/time/time.h"
 #include "base/clock.h"
-#include "base/logging.h"
 #include "base/stopwatch.h"
 #include "base/version.h"
 #include "base/vlog.h"
@@ -54,6 +53,7 @@
 #include "config/config_handler.h"
 #include "dictionary/user_dictionary_session_handler.h"
 #include "engine/engine_interface.h"
+#include "engine/supplemental_model_interface.h"
 #include "engine/user_data_manager_interface.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -162,9 +162,8 @@ SessionHandler::SessionHandler(std::unique_ptr<EngineInterface> engine)
     absl::SetFlag(&FLAGS_last_command_timeout, 60);
   }
 
-  // allow [2..128] sessions
-  max_session_size_ =
-      std::max(2, std::min(absl::GetFlag(FLAGS_max_session_size), 128));
+  // Allow [2..128] sessions.
+  max_session_size_ = std::clamp(absl::GetFlag(FLAGS_max_session_size), 2, 128);
   session_map_ = std::make_unique<SessionMap>(max_session_size_);
 
   if (!engine_) {
@@ -172,7 +171,7 @@ SessionHandler::SessionHandler(std::unique_ptr<EngineInterface> engine)
   }
 
 
-  // everything is OK
+  // Everything is OK.
   is_available_ = true;
 }
 
@@ -378,7 +377,7 @@ bool SessionHandler::EvalCommand(commands::Command *command) {
       eval_succeeded = CheckSpelling(command);
       break;
     case commands::Input::RELOAD_SPELL_CHECKER:
-      eval_succeeded = ReloadSpellChecker(command);
+      eval_succeeded = ReloadSupplementalModel(command);
       break;
     case commands::Input::GET_SERVER_VERSION:
       eval_succeeded = GetServerVersion(command);
@@ -681,11 +680,23 @@ bool SessionHandler::CheckSpelling(commands::Command *command) {
     return true;
   }
 
+  if (supplemental_model_) {
+    auto response = supplemental_model_->CheckSpelling(
+        command->input().check_spelling_request());
+    auto *stored = command->mutable_output()->mutable_check_spelling_response();
+    if (response.has_value()) {
+      *stored = std::move(*response);
+    }
+  }
 
   return true;
 }
 
-bool SessionHandler::ReloadSpellChecker(commands::Command *command) {
+bool SessionHandler::ReloadSupplementalModel(commands::Command *command) {
+  if (supplemental_model_) {
+    supplemental_model_->LoadAsync(command->input().engine_reload_request());
+    return false;
+  }
   return true;
 }
 

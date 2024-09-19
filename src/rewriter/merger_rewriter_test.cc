@@ -29,13 +29,16 @@
 
 #include "rewriter/merger_rewriter.h"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
 #include "absl/strings/string_view.h"
 #include "converter/segments.h"
+#include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
+#include "rewriter/rewriter_interface.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
 
@@ -80,6 +83,10 @@ class TestRewriter : public RewriterInterface {
 
   void Finish(const ConversionRequest &request, Segments *segments) override {
     buffer_->append(name_ + ".Finish();");
+  }
+
+  void Revert(Segments *segments) override {
+    buffer_->append(name_ + ".Revert();");
   }
 
   bool Sync() override {
@@ -281,6 +288,20 @@ TEST_F(MergerRewriterTest, Finish) {
             "a.Finish();"
             "b.Finish();"
             "c.Finish();");
+}
+
+TEST_F(MergerRewriterTest, Revert) {
+  std::string call_result;
+  const ConversionRequest request;
+  MergerRewriter merger;
+  merger.AddRewriter(std::make_unique<TestRewriter>(&call_result, "a", false));
+  merger.AddRewriter(std::make_unique<TestRewriter>(&call_result, "b", false));
+  merger.AddRewriter(std::make_unique<TestRewriter>(&call_result, "c", false));
+  merger.Revert(nullptr);
+  EXPECT_EQ(call_result,
+            "a.Revert();"
+            "b.Revert();"
+            "c.Revert();");
 }
 
 TEST_F(MergerRewriterTest, Sync) {

@@ -34,7 +34,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "testing/gunit.h"
@@ -55,8 +54,8 @@ class DataManagerTestBase : public ::testing::Test {
                       const std::string &connection_txt_file,
                       int expected_resolution,
                       // The following two are used in suggestion filter test.
-                      const std::vector<std::string> &dictionary_files,
-                      const std::vector<std::string> &suggestion_filter_files);
+                      std::vector<std::string> dictionary_files,
+                      std::vector<std::string> suggestion_filter_files);
   DataManagerTestBase(const DataManagerTestBase &) = delete;
   DataManagerTestBase &operator=(const DataManagerTestBase &) = delete;
 

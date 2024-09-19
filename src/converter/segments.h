@@ -41,9 +41,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/container/freelist.h"
-#include "base/logging.h"
 #include "base/number_util.h"
 #include "base/strings/assign.h"
 #include "converter/lattice.h"
@@ -128,6 +129,8 @@ class Segment final {
       SUFFIX_DICTIONARY = 1 << 15,
       // Disables modification and removal in rewriters.
       NO_MODIFICATION = 1 << 16,
+      // Candidate which is reranked by user segment history rewriter.
+      USER_SEGMENT_HISTORY_REWRITER = 1 << 17,
     };
     // LINT.ThenChange(//converter/converter_main.cc)
 
@@ -155,6 +158,7 @@ class Segment final {
       DICTIONARY_PREDICTOR_ZERO_QUERY_EMOJI = 1 << 3,
       DICTIONARY_PREDICTOR_ZERO_QUERY_BIGRAM = 1 << 4,
       DICTIONARY_PREDICTOR_ZERO_QUERY_SUFFIX = 1 << 5,
+      DICTIONARY_PREDICTOR_ZERO_QUERY_SUPPLEMENTAL_MODEL = 1 << 7,
 
       USER_HISTORY_PREDICTOR = 1 << 6,
     };
@@ -377,7 +381,7 @@ class Segment final {
   // TODO(toshiyuki): Integrate meta candidates to candidate and delete these
   size_t meta_candidates_size() const { return meta_candidates_.size(); }
   void clear_meta_candidates() { meta_candidates_.clear(); }
-  const std::vector<Candidate> &meta_candidates() const {
+  absl::Span<const Candidate> meta_candidates() const {
     return meta_candidates_;
   }
   std::vector<Candidate> *mutable_meta_candidates() {
@@ -457,15 +461,15 @@ class Segments final {
       UPDATE_ENTRY,
     };
     uint16_t revert_entry_type = 0;
-    // UserHitoryPredictor uses '1' for now.
-    // Do not use duplicate keys.
+    // UserHitoryPredictor uses '1', UserSegmentHistoryRewriter uses '2' for
+    // now. Do not use duplicate keys.
     uint16_t id = 0;
     uint32_t timestamp = 0;
     std::string key;
   };
 
   // This class wraps an iterator as is, except that `operator*` dereferences
-  // twice. For example, if `InnnerIterator` is the iterator of
+  // twice. For example, if `InnerIterator` is the iterator of
   // `std::deque<Segment *>`, `operator*` dereferences to `Segment&`.
   using inner_iterator = std::deque<Segment *>::iterator;
   using inner_const_iterator = std::deque<Segment *>::const_iterator;

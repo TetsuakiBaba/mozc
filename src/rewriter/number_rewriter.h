@@ -30,9 +30,9 @@
 #ifndef MOZC_REWRITER_NUMBER_REWRITER_H_
 #define MOZC_REWRITER_NUMBER_REWRITER_H_
 
-#include <cstddef>
 #include <vector>
 
+#include "absl/types/span.h"
 #include "base/container/serialized_string_array.h"
 #include "base/number_util.h"
 #include "converter/segments.h"
@@ -64,7 +64,7 @@ class NumberRewriter : public RewriterInterface {
   void RememberNumberStyle(const Segment::Candidate &candidate);
   std::vector<Segment::Candidate> GenerateCandidatesToInsert(
       const Segment::Candidate &arabic_candidate,
-      const std::vector<NumberUtil::NumberString> &numbers,
+      absl::Span<const NumberUtil::NumberString> numbers,
       bool should_rerank) const;
   bool ShouldRerankCandidates(const ConversionRequest &request,
                               const Segments &segments) const;

@@ -93,6 +93,7 @@
 // suffix array.
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <ios>
 #include <iostream>
@@ -105,13 +106,15 @@
 #include "absl/base/config.h"
 #include "absl/container/btree_map.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/container/serialized_string_array.h"
 #include "base/file_stream.h"
 #include "base/init_mozc.h"
-#include "base/logging.h"
 
 ABSL_FLAG(std::string, usage_data_file, "", "usage data file");
 ABSL_FLAG(std::string, cforms_file, "", "cforms file");
@@ -324,7 +327,7 @@ void Convert() {
                              std::ios_base::out | std::ios_base::binary);
     int out_count = 0;
     for (size_t i = 0; i < conjugation_list.size(); ++i) {
-      const std::vector<ConjugationType> &conjugations =
+      absl::Span<const ConjugationType> conjugations =
           inflection_map[conjugation_list[i]];
       conjugation_index[i] = out_count;
       if (conjugations.empty()) {

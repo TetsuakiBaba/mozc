@@ -33,8 +33,8 @@
 #include <memory>
 #include <utility>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
-#include "base/logging.h"
 #include "converter/connector.h"
 #include "converter/segmenter.h"
 #include "data_manager/data_manager_interface.h"
@@ -42,12 +42,10 @@
 #include "dictionary/pos_group.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/suppression_dictionary.h"
-#include "engine/spellchecker_interface.h"
-#include "prediction/rescorer_interface.h"
+#include "engine/supplemental_model_interface.h"
 #include "prediction/single_kanji_prediction_aggregator.h"
 #include "prediction/suggestion_filter.h"
 #include "prediction/zero_query_dict.h"
-
 
 namespace mozc {
 namespace engine {
@@ -72,7 +70,6 @@ class Modules {
       std::unique_ptr<dictionary::DictionaryInterface> suffix_dictionary);
   void PresetDictionary(
       std::unique_ptr<dictionary::DictionaryInterface> dictionary);
-  void PresetRescorer(std::unique_ptr<prediction::RescorerInterface> rescorer);
   void PresetSingleKanjiPredictionAggregator(
       std::unique_ptr<const prediction::SingleKanjiPredictionAggregator>
           single_kanji_prediction_aggregator);
@@ -115,20 +112,13 @@ class Modules {
   const ZeroQueryDict &GetZeroQueryNumberDict() const {
     return zero_query_number_dict_;
   }
-  const prediction::RescorerInterface *GetRescorer() const {
-    return rescorer_.get();
-  }
-  void SetRescorer(
-      std::unique_ptr<const prediction::RescorerInterface> rescorer) {
-    rescorer_ = std::move(rescorer);
-  }
 
-
-  const engine::SpellcheckerInterface *GetSpellchecker() const {
-    return spellchecker_;
+  const engine::SupplementalModelInterface *GetSupplementalModel() const {
+    return supplemental_model_;
   }
-  void SetSpellchecker(const engine::SpellcheckerInterface *spellchecker) {
-    spellchecker_ = spellchecker;
+  void SetSupplementalModel(
+      const engine::SupplementalModelInterface *supplemental_model) {
+    supplemental_model_ = supplemental_model;
   }
 
  private:
@@ -147,13 +137,11 @@ class Modules {
       single_kanji_prediction_aggregator_;
   ZeroQueryDict zero_query_dict_;
   ZeroQueryDict zero_query_number_dict_;
-  std::unique_ptr<const prediction::RescorerInterface> rescorer_;
 
-
-  // Spellchecker used for homonym correction.
-  // Module doesn't have the ownership of spellchecker_,
+  // SupplementalModel used for homonym correction.
+  // Module doesn't have the ownership of supplemental_model_,
   // SessionHandler owns this this instance. (usually a singleton object).
-  const engine::SpellcheckerInterface *spellchecker_ = nullptr;
+  const engine::SupplementalModelInterface *supplemental_model_ = nullptr;
 };
 
 }  // namespace engine

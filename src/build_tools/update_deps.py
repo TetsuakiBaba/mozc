@@ -81,9 +81,9 @@ class ArchiveInfo:
 
 
 QT6 = ArchiveInfo(
-    url='https://download.qt.io/archive/qt/6.7/6.7.0/submodules/qtbase-everywhere-src-6.7.0.tar.xz',
-    size=49314276,
-    sha256='11b2e29e2e52fb0e3b453ea13bbe51a10fdff36e1c192d8868c5a40233b8b254',
+    url='https://download.qt.io/archive/qt/6.7/6.7.2/submodules/qtbase-everywhere-src-6.7.2.tar.xz',
+    size=49364504,
+    sha256='c5f22a5e10fb162895ded7de0963328e7307611c688487b5d152c9ee64767599',
 )
 
 NINJA_MAC = ArchiveInfo(

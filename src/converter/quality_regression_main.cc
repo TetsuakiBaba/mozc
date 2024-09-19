@@ -35,11 +35,13 @@
 #include <vector>
 
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "base/file/temp_dir.h"
 #include "base/init_mozc.h"
-#include "base/logging.h"
 #include "base/system_util.h"
 #include "converter/quality_regression_util.h"
 #include "engine/engine.h"
@@ -58,7 +60,7 @@ using ::mozc::TempDirectory;
 using ::mozc::quality_regression::QualityRegressionUtil;
 
 absl::Status Run(std::ostream &out, const Engine &engine,
-                 const std::vector<QualityRegressionUtil::TestItem> &items) {
+                 absl::Span<const QualityRegressionUtil::TestItem> items) {
   QualityRegressionUtil util(engine.GetConverter());
   for (const QualityRegressionUtil::TestItem &item : items) {
     std::string actual_value;

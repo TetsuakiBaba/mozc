@@ -39,13 +39,14 @@
 #include <vector>
 
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "base/hash.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "converter/segments.h"
@@ -272,9 +273,8 @@ bool IsNaturalContent(const Segment::Candidate &cand,
 
   // special cases
   if (top_content_len == 1) {
-    const char32_t wchar = Util::Utf8ToCodepoint(top_content);
-
-    switch (wchar) {
+    const char32_t codepoint = Util::Utf8ToCodepoint(top_content);
+    switch (codepoint) {
       case 0x304a:  // "お"
       case 0x5fa1:  // "御"
       case 0x3054:  // "ご"

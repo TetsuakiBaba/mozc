@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -136,6 +137,13 @@ bool SessionHandlerTool::ClearUserPrediction() {
   return handler_->EvalCommand(&command);
 }
 
+bool SessionHandlerTool::ClearUserHistory() {
+  Command command;
+  command.mutable_input()->set_id(id_);
+  command.mutable_input()->set_type(commands::Input::CLEAR_USER_HISTORY);
+  return handler_->EvalCommand(&command);
+}
+
 bool SessionHandlerTool::SendKeyWithOption(const commands::KeyEvent &key,
                                            const commands::Input &option,
                                            commands::Output *output) {
@@ -213,6 +221,18 @@ bool SessionHandlerTool::UndoOrRewind(commands::Output *output) {
   return EvalCommand(&input, output);
 }
 
+bool SessionHandlerTool::DeleteCandidateFromHistory(std::optional<int> id,
+                                                    commands::Output *output) {
+  commands::Input input;
+  input.set_type(commands::Input::SEND_COMMAND);
+  input.mutable_command()->set_type(
+      commands::SessionCommand::DELETE_CANDIDATE_FROM_HISTORY);
+  if (id.has_value()) {
+    input.mutable_command()->set_id(*id);
+  }
+  return EvalCommand(&input, output);
+}
+
 bool SessionHandlerTool::SwitchInputMode(
     commands::CompositionMode composition_mode) {
   commands::Input input;
@@ -239,13 +259,15 @@ bool SessionHandlerTool::SetConfig(const config::Config &config,
   return EvalCommand(&input, output);
 }
 
-bool SessionHandlerTool::SyncData() { return data_manager_->Wait(); }
+bool SessionHandlerTool::SyncData() {
+  return data_manager_->Sync() && data_manager_->Wait();
+}
 
 void SessionHandlerTool::SetCallbackText(const absl::string_view text) {
   strings::Assign(callback_text_, text);
 }
 
-bool SessionHandlerTool::ReloadSpellchecker(absl::string_view model_path) {
+bool SessionHandlerTool::ReloadSupplementalModel(absl::string_view model_path) {
   commands::Input input;
   input.mutable_engine_reload_request()->set_file_path(model_path);
   input.set_type(commands::Input::RELOAD_SPELL_CHECKER);
@@ -344,6 +366,7 @@ void SessionHandlerInterpreter::SyncDataToStorage() {
 
 void SessionHandlerInterpreter::ClearUserPrediction() {
   CHECK(client_->ClearUserPrediction());
+  CHECK(client_->ClearUserHistory());
   SyncDataToStorage();
 }
 
@@ -662,6 +685,14 @@ absl::Status SessionHandlerInterpreter::Eval(
     MOZC_ASSERT_TRUE(client_->SubmitCandidate(id, last_output_.get()));
   } else if (command == "UNDO_OR_REWIND") {
     MOZC_ASSERT_TRUE(client_->UndoOrRewind(last_output_.get()));
+  } else if (command == "DELETE_CANDIDATE_FROM_HISTORY") {
+    MOZC_ASSERT_TRUE(args.size() == 1 || args.size() == 2);
+    std::optional<int> id = std::nullopt;
+    if (args.size() == 2) {
+      id = NumberUtil::SimpleAtoi(args[1]);
+    }
+    MOZC_ASSERT_TRUE(
+        client_->DeleteCandidateFromHistory(id, last_output_.get()));
   } else if (command == "SWITCH_INPUT_MODE") {
     MOZC_ASSERT_EQ(2, args.size());
     CompositionMode composition_mode;
@@ -868,9 +899,9 @@ void SessionHandlerInterpreter::SetRequest(const commands::Request &request) {
   *request_ = request;
 }
 
-void SessionHandlerInterpreter::ReloadSpellchecker(
+void SessionHandlerInterpreter::ReloadSupplementalModel(
     absl::string_view model_path) {
-  client_->ReloadSpellchecker(model_path);
+  client_->ReloadSupplementalModel(model_path);
 }
 
 }  // namespace session

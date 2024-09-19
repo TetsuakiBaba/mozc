@@ -45,7 +45,7 @@
 #include "data_manager/data_manager_interface.h"
 #include "engine/data_loader.h"
 #include "engine/modules.h"
-#include "engine/spellchecker_interface.h"
+#include "engine/supplemental_model_interface.h"
 #include "engine/user_data_manager_interface.h"
 #include "prediction/dictionary_predictor.h"
 #include "prediction/predictor.h"
@@ -73,8 +73,6 @@ class UserDataManager final : public UserDataManagerInterface {
   bool ClearUserHistory() override;
   bool ClearUserPrediction() override;
   bool ClearUnusedUserPrediction() override;
-  bool ClearUserPredictionEntry(absl::string_view key,
-                                absl::string_view value) override;
   bool Wait() override;
 
  private:
@@ -107,11 +105,6 @@ bool UserDataManager::ClearUserPrediction() {
 bool UserDataManager::ClearUnusedUserPrediction() {
   predictor_->ClearUnusedHistory();
   return true;
-}
-
-bool UserDataManager::ClearUserPredictionEntry(const absl::string_view key,
-                                               const absl::string_view value) {
-  return predictor_->ClearHistoryEntry(key, value);
 }
 
 bool UserDataManager::Wait() { return predictor_->Wait(); }
@@ -179,12 +172,12 @@ absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules,
 
   RETURN_IF_NULL(modules);
 
-  // Keeps the previous spellchecker if exists.
-  const engine::SpellcheckerInterface *spellchecker =
-      modules_->GetSpellchecker();
+  // Keeps the previous supplemental_model if exists.
+  const engine::SupplementalModelInterface *supplemental_model =
+      modules_->GetSupplementalModel();
 
   modules_ = std::move(modules);
-  modules_->SetSpellchecker(spellchecker);
+  modules_->SetSupplementalModel(supplemental_model);
 
   immutable_converter_ = std::make_unique<ImmutableConverter>(*modules_);
   RETURN_IF_NULL(immutable_converter_);
@@ -253,6 +246,7 @@ bool Engine::Reload() {
 }
 
 bool Engine::Sync() {
+  GetUserDataManager()->Sync();
   if (!modules_->GetUserDictionary()) {
     return true;
   }

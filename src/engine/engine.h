@@ -30,8 +30,6 @@
 #ifndef MOZC_ENGINE_ENGINE_H_
 #define MOZC_ENGINE_ENGINE_H_
 
-#include <atomic>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -49,10 +47,9 @@
 #include "engine/engine_interface.h"
 #include "engine/minimal_engine.h"
 #include "engine/modules.h"
-#include "engine/spellchecker_interface.h"
+#include "engine/supplemental_model_interface.h"
 #include "engine/user_data_manager_interface.h"
 #include "prediction/predictor_interface.h"
-#include "prediction/rescorer_interface.h"
 #include "rewriter/rewriter_interface.h"
 
 namespace mozc {
@@ -138,19 +135,18 @@ class Engine : public EngineInterface {
                         : minimal_engine_.GetDataManager();
   }
 
+  // Returns a list of part-of-speech (e.g. "名詞", "動詞一段") to be used for
+  // the user dictionary GUI tool.
+  // Since the POS set may differ per LM, this function returns
+  // available POS items. In practice, the POS items are rarely changed.
   std::vector<std::string> GetPosList() const override {
     return initialized_ ? modules_->GetUserDictionary()->GetPosList()
                         : minimal_engine_.GetPosList();
   }
 
-  void SetSpellchecker(
-      const engine::SpellcheckerInterface *spellchecker) override {
-    modules_->SetSpellchecker(spellchecker);
-  }
-
-  void SetRescorer(
-      std::unique_ptr<const prediction::RescorerInterface> rescorer) override {
-    modules_->SetRescorer(std::move(rescorer));
+  void SetSupplementalModel(
+      const engine::SupplementalModelInterface *supplemental_model) override {
+    modules_->SetSupplementalModel(supplemental_model);
   }
 
   // For testing only.

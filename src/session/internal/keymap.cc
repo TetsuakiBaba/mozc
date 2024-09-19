@@ -33,7 +33,6 @@
 
 #include <algorithm>
 #include <istream>
-#include <iterator>
 #include <memory>
 #include <ostream>
 #include <sstream>
@@ -42,10 +41,11 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_split.h"
 #include "base/config_file_stream.h"
 #include "base/file_stream.h"
-#include "base/logging.h"
 #include "base/util.h"
 #include "composer/key_parser.h"
 #include "config/config_handler.h"
@@ -126,7 +126,7 @@ bool KeyMapManager::ApplyPrimarySessionKeymap(
     return LoadFile(keymap_file);
   } else {
     // For custom keymap, apply keymap in the config message.
-#ifndef MOZC_NO_LOGGING
+#ifndef NDEBUG
     // make a copy of keymap file just for debugging
     const char *keymap_file = GetKeyMapFileName(keymap);
     const std::string filename = ConfigFileStream::GetFileName(keymap_file);
@@ -136,7 +136,7 @@ bool KeyMapManager::ApplyPrimarySessionKeymap(
       ofs << "# Nothing happens when you edit this file manually." << std::endl;
       ofs << custom_keymap_table;
     }
-#endif  // MOZC_NO_LOGGING
+#endif  // NDEBUG
 
     std::istringstream ifs(custom_keymap_table);
     return LoadStream(&ifs);
@@ -247,14 +247,14 @@ bool KeyMapManager::LoadStreamWithErrors(std::istream *ifs,
 bool KeyMapManager::AddCommand(const std::string &state_name,
                                const std::string &key_event_name,
                                const std::string &command_name) {
-#ifdef MOZC_NO_LOGGING  // means RELEASE BUILD
+#ifdef NDEBUG  // means RELEASE BUILD
   // On the release build, we do not support the ReportBug
   // commands.  Note, true is returned as the arguments are
   // interpreted properly.
   if (command_name == "ReportBug") {
     return true;
   }
-#endif  // MOZC_NO_LOGGING
+#endif  // NDEBUG
 
   commands::KeyEvent key_event;
   if (!KeyParser::ParseKey(key_event_name, &key_event)) {
@@ -658,9 +658,9 @@ void KeyMapManager::InitCommandData() {
     RegisterConversionCommand("InputModeHalfAlphanumeric",
                               ConversionState::NONE);
   }
-#ifndef MOZC_NO_LOGGING  // means NOT RELEASE build
+#ifndef NDEBUG  // means NOT RELEASE build
   RegisterConversionCommand("ReportBug", ConversionState::REPORT_BUG);
-#endif  // MOZC_NO_LOGGING
+#endif  // NDEBUG
 }
 
 bool KeyMapManager::GetCommandDirect(

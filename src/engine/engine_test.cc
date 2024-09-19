@@ -30,19 +30,16 @@
 #include "engine/engine.h"
 
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
-#include "composer/query.h"
-#include "converter/segments.h"
 #include "data_manager/data_manager.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "engine/modules.h"
-#include "engine/spellchecker_interface.h"
+#include "engine/supplemental_model_interface.h"
+#include "protocol/engine_builder.pb.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
 
@@ -51,24 +48,12 @@ namespace engine {
 
 namespace {
 
-class SpellcheckerForTesting : public engine::SpellcheckerInterface {
- public:
-  commands::CheckSpellingResponse CheckSpelling(
-      const commands::CheckSpellingRequest &) const override {
-    return commands::CheckSpellingResponse();
-  }
-
-  std::optional<std::vector<composer::TypeCorrectedQuery>>
-  CheckCompositionSpelling(absl::string_view, absl::string_view, bool,
-                           const commands::Request &) const override {
-    return std::nullopt;
-  }
-
-  void MaybeApplyHomonymCorrection(Segments *) const override {}
+class SupplementalModelForTesting : public engine::SupplementalModelInterface {
 };
 
 constexpr absl::string_view kMockMagicNumber = "MOCK";
 constexpr absl::string_view kOssMagicNumber = "\xEFMOZC\x0D\x0A";
+constexpr int kMiddlePriority = 50;
 }  // namespace
 
 class EngineTest : public ::testing::Test {
@@ -79,22 +64,26 @@ class EngineTest : public ::testing::Test {
     mock_request_.set_engine_type(EngineReloadRequest::MOBILE);
     mock_request_.set_file_path(mock_path);
     mock_request_.set_magic_number(kMockMagicNumber);
+    mock_request_.set_priority(kMiddlePriority);
 
     const std::string oss_path = testing::GetSourcePath(
         {MOZC_SRC_COMPONENTS("data_manager"), "oss", "mozc.data"});
     oss_request_.set_engine_type(EngineReloadRequest::MOBILE);
     oss_request_.set_file_path(oss_path);
     oss_request_.set_magic_number(kOssMagicNumber);
+    oss_request_.set_priority(kMiddlePriority);
 
     const std::string invalid_path = testing::GetSourcePath(
         {MOZC_SRC_COMPONENTS("data_manager"), "invalid", "mozc.data"});
     invalid_path_request_.set_engine_type(EngineReloadRequest::MOBILE);
     invalid_path_request_.set_file_path(invalid_path);
     invalid_path_request_.set_magic_number(kOssMagicNumber);
+    invalid_path_request_.set_priority(kMiddlePriority);
 
     invalid_data_request_.set_engine_type(EngineReloadRequest::MOBILE);
     invalid_data_request_.set_file_path(mock_path);
     invalid_data_request_.set_magic_number(kOssMagicNumber);
+    invalid_data_request_.set_priority(kMiddlePriority);
 
     DataManager mock_data_manager;
     mock_data_manager.InitFromFile(mock_request_.file_path(),
@@ -124,9 +113,10 @@ class EngineTest : public ::testing::Test {
 };
 
 TEST_F(EngineTest, ReloadModulesTest) {
-  SpellcheckerForTesting spellchecker;
-  engine_->SetSpellchecker(&spellchecker);
-  EXPECT_EQ(engine_->GetModulesForTesting()->GetSpellchecker(), &spellchecker);
+  SupplementalModelForTesting supplemental_model;
+  engine_->SetSupplementalModel(&supplemental_model);
+  EXPECT_EQ(engine_->GetModulesForTesting()->GetSupplementalModel(),
+            &supplemental_model);
 
   auto modules = std::make_unique<engine::Modules>();
   CHECK_OK(modules->Init(std::make_unique<testing::MockDataManager>()));
@@ -134,7 +124,8 @@ TEST_F(EngineTest, ReloadModulesTest) {
   const bool is_mobile = true;
   CHECK_OK(engine_->ReloadModules(std::move(modules), is_mobile));
 
-  EXPECT_EQ(engine_->GetModulesForTesting()->GetSpellchecker(), &spellchecker);
+  EXPECT_EQ(engine_->GetModulesForTesting()->GetSupplementalModel(),
+            &supplemental_model);
 }
 
 // Tests the interaction with DataLoader for successful Engine

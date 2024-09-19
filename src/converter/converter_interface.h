@@ -30,9 +30,8 @@
 #ifndef MOZC_CONVERTER_CONVERTER_INTERFACE_H_
 #define MOZC_CONVERTER_CONVERTER_INTERFACE_H_
 
+#include <cstddef>
 #include <cstdint>
-#include <string>
-#include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
@@ -124,6 +123,15 @@ class ConverterInterface {
   // Revert last Finish operation
   virtual void RevertConversion(Segments *segments) const = 0;
 
+  // Delete candidate from user input history.
+  // Returns false if the candidate was not found or deletion failed.
+  // Note: |segment_index| is the index for all segments, not the index of
+  // conversion_segments.
+  ABSL_MUST_USE_RESULT
+  virtual bool DeleteCandidateFromHistory(const Segments &segments,
+                                          size_t segment_index,
+                                          int candidate_index) const = 0;
+
   // Reconstruct history segments from given preceding text.
   ABSL_MUST_USE_RESULT
   virtual bool ReconstructHistory(Segments *segments,
@@ -167,7 +175,7 @@ class ConverterInterface {
   // 1st segment.
   ABSL_MUST_USE_RESULT
   virtual bool CommitSegments(
-      Segments *segments, const std::vector<size_t> &candidate_index) const = 0;
+      Segments *segments, absl::Span<const size_t> candidate_index) const = 0;
 
   // Resize segment_index-th segment by offset_length.
   // offset_length can be negative.

@@ -31,7 +31,7 @@
 #define MOZC_REWRITER_USAGE_REWRITER_H_
 
 #ifndef NO_USAGE_REWRITER
-
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <new>
@@ -45,6 +45,7 @@
 #include "data_manager/data_manager_interface.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
+#include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
 #include "testing/friend_test.h"
 
@@ -114,6 +115,9 @@ class UsageRewriter : public RewriterInterface {
   const dictionary::DictionaryInterface *dictionary_;
   const uint32_t *base_conjugation_suffix_;
   SerializedStringArray string_array_;
+
+ private:
+  friend class UsageRewriterPeer;
 };
 
 }  // namespace mozc

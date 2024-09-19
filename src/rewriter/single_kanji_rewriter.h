@@ -30,14 +30,17 @@
 #ifndef MOZC_REWRITER_SINGLE_KANJI_REWRITER_H_
 #define MOZC_REWRITER_SINGLE_KANJI_REWRITER_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+#include "converter/segments.h"
 #include "data_manager/data_manager_interface.h"
 #include "dictionary/pos_matcher.h"
 #include "dictionary/single_kanji_dictionary.h"
+#include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
 
 namespace mozc {
@@ -55,7 +58,7 @@ class SingleKanjiRewriter : public RewriterInterface {
  private:
   void AddDescriptionForExistingCandidates(Segment *segment) const;
   bool InsertCandidate(bool is_single_segment, uint16_t single_kanji_id,
-                       const std::vector<std::string> &kanji_list,
+                       absl::Span<const std::string> kanji_list,
                        Segment *segment) const;
   void FillCandidate(absl::string_view key, absl::string_view value, int cost,
                      uint16_t single_kanji_id, Segment::Candidate *cand) const;

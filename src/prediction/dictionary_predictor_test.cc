@@ -60,9 +60,9 @@
 #include "dictionary/dictionary_token.h"
 #include "dictionary/pos_matcher.h"
 #include "engine/modules.h"
+#include "engine/supplemental_model_interface.h"
+#include "engine/supplemental_model_mock.h"
 #include "prediction/prediction_aggregator_interface.h"
-#include "prediction/rescorer_interface.h"
-#include "prediction/rescorer_mock.h"
 #include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -147,16 +147,8 @@ class DictionaryPredictorTestPeer {
   static void MaybeSuppressAggressiveTypingCorrection(
       const ConversionRequest &request,
       const TypingCorrectionMixingParams &typing_correction_mixing_params,
-      Segments *segments) {
-    DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection(
-        request, typing_correction_mixing_params, segments);
-  }
-
-  static void MaybeSuppressAggressiveTypingCorrection2(
-      const ConversionRequest &request,
-      const TypingCorrectionMixingParams &typing_correction_mixing_params,
       std::vector<absl::Nonnull<const Result *>> *results) {
-    DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection2(
+    DictionaryPredictor::MaybeSuppressAggressiveTypingCorrection(
         request, typing_correction_mixing_params, results);
   }
 
@@ -301,17 +293,17 @@ class MockImmutableConverter : public ImmutableConverterInterface {
  public:
   MOCK_METHOD(bool, ConvertForRequest,
               (const ConversionRequest &request, Segments *segments),
-              (const override));
+              (const, override));
 };
 
 class MockAggregator : public prediction::PredictionAggregatorInterface {
  public:
   MOCK_METHOD(std::vector<prediction::Result>, AggregateResults,
               (const ConversionRequest &request, const Segments &segments),
-              (const override));
+              (const, override));
   MOCK_METHOD(std::vector<prediction::Result>, AggregateTypingCorrectedResults,
               (const ConversionRequest &request, const Segments &segments),
-              (const override));
+              (const, override));
 };
 
 // Helper class to hold predictor objects.
@@ -320,10 +312,10 @@ class MockDataAndPredictor {
   MockDataAndPredictor() : MockDataAndPredictor(nullptr) {}
 
   explicit MockDataAndPredictor(
-      std::unique_ptr<prediction::RescorerInterface> rescorer)
+      engine::SupplementalModelInterface *supplemental_model)
       : mock_immutable_converter_(), mock_aggregator_(new MockAggregator()) {
-    modules_.PresetRescorer(std::move(rescorer));
     CHECK_OK(modules_.Init(std::make_unique<testing::MockDataManager>()));
+    modules_.SetSupplementalModel(supplemental_model);
 
     predictor_ = std::make_unique<DictionaryPredictorTestPeer>(
         modules_, absl::WrapUnique(mock_aggregator_),
@@ -1280,8 +1272,6 @@ TEST_F(DictionaryPredictorTest, FixSRealtimeTopCandidatesCostOnMobile) {
       data_and_predictor->predictor();
   // turn on mobile mode
   request_test_util::FillMobileRequest(request_.get());
-  request_->mutable_decoder_experiment_params()
-      ->set_apply_user_segment_history_rewriter_for_prediction(true);
 
   {
     MockAggregator *aggregator = data_and_predictor->mutable_aggregator();
@@ -1468,34 +1458,6 @@ TEST_F(DictionaryPredictorTest, Dedup) {
     ASSERT_EQ(segments.conversion_segments_size(), 1);
     EXPECT_EQ(segments.conversion_segment(0).candidates_size(), kSize);
   }
-  {
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_max_count(5);
-    std::vector<Result> results = {
-        CreateResult6("test", "value0", 0, 0, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value0", 0, 1, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value0", 0, 2, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value0", 0, 3, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value0", 0, 4, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value1", 0, 5, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-        CreateResult6("test", "value2", 0, 6, prediction::TYPING_CORRECTION,
-                      Token::NONE),
-    };
-    Segments segments;
-    InitSegmentsWithKey("test", &segments);
-    predictor.AddPredictionToCandidates(*convreq_for_prediction_, &segments,
-                                        typing_correction_mixing_params_,
-                                        absl::MakeSpan(results));
-
-    ASSERT_EQ(segments.conversion_segments_size(), 1);
-    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 3);
-  }
 }
 
 TEST_F(DictionaryPredictorTest, TypingCorrectionResultsLimit) {
@@ -1505,8 +1467,6 @@ TEST_F(DictionaryPredictorTest, TypingCorrectionResultsLimit) {
   // turn on mobile mode
   request_test_util::FillMobileRequest(request_.get());
 
-  request_->mutable_decoder_experiment_params()
-      ->set_typing_correction_max_count(5);
   std::vector<Result> results = {
       CreateResult6("tc_key0", "tc_value0", 0, 0, prediction::TYPING_CORRECTION,
                     Token::NONE),
@@ -1534,11 +1494,10 @@ TEST_F(DictionaryPredictorTest, TypingCorrectionResultsLimit) {
                                       absl::MakeSpan(results));
   ASSERT_EQ(segments.conversion_segments_size(), 1);
   const Segment segment = segments.conversion_segment(0);
-  EXPECT_EQ(segment.candidates_size(), 5);
+  EXPECT_EQ(segment.candidates_size(), 3);
   EXPECT_TRUE(FindCandidateByValue(segment, "tc_value0"));
   EXPECT_TRUE(FindCandidateByValue(segment, "tc_value1"));
-  EXPECT_TRUE(FindCandidateByValue(segment, "tc_value3"));
-  EXPECT_TRUE(FindCandidateByValue(segment, "tc_value4"));
+  EXPECT_TRUE(FindCandidateByValue(segment, "tc_value2"));
 }
 
 TEST_F(DictionaryPredictorTest, SortResult) {
@@ -1734,39 +1693,6 @@ TEST_F(DictionaryPredictorTest, MaybePopulateTypingCorrectedResultsTest) {
     EXPECT_EQ(results.size(), 4);
   }
 
-  {
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_correction_score_max_diff(0.5);
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_conversion_cost_max_diff(500);
-    auto results = base_results;
-    predictor.MaybePopulateTypingCorrectedResults(*convreq_for_prediction_,
-                                                  segments, &results);
-    EXPECT_EQ(results.size(), 4);
-  }
-
-  {
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_correction_score_max_diff(1.0);
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_conversion_cost_max_diff(500);
-    auto results = base_results;
-    predictor.MaybePopulateTypingCorrectedResults(*convreq_for_prediction_,
-                                                  segments, &results);
-    EXPECT_EQ(results.size(), 4);
-  }
-
-  {
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_correction_score_max_diff(0.5);
-    request_->mutable_decoder_experiment_params()
-        ->set_typing_correction_literal_on_top_conversion_cost_max_diff(1000);
-    auto results = base_results;
-    predictor.MaybePopulateTypingCorrectedResults(*convreq_for_prediction_,
-                                                  segments, &results);
-    EXPECT_EQ(results.size(), 4);
-  }
-
   // disable typing correction.
   {
     config_->set_use_typing_correction(false);
@@ -1778,75 +1704,6 @@ TEST_F(DictionaryPredictorTest, MaybePopulateTypingCorrectedResultsTest) {
 }
 
 TEST_F(DictionaryPredictorTest, MaybeSuppressAggressiveTypingCorrectionTest) {
-  Segments segments;
-  InitSegmentsWithKey("key", &segments);
-
-  Segment *segment = segments.mutable_conversion_segment(0);
-  for (int i = 0; i < 10; ++i) {
-    segment->add_candidate();
-  }
-
-  auto get_top_value = [&segments]() {
-    return segments.conversion_segment(0).candidate(0).value;
-  };
-
-  auto get_second_value = [&segments]() {
-    return segments.conversion_segment(0).candidate(1).value;
-  };
-
-  auto reset_segments = [&]() {
-    for (int i = 0; i < segment->candidates_size(); ++i) {
-      auto *candidate = segment->mutable_candidate(i);
-      candidate->attributes = 0;
-      candidate->key = absl::StrCat("key_", i);
-      candidate->value = absl::StrCat("value_", i);
-    }
-
-    for (int i = 1; i <= 2; ++i) {
-      segment->mutable_candidate(i)->attributes |=
-          Segment::Candidate::TYPING_CORRECTION;
-    }
-
-    segment->mutable_candidate(0)->cost = 100;
-    segment->mutable_candidate(3)->cost = 500;
-  };
-
-  reset_segments();
-
-  TypingCorrectionMixingParams params;
-
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
-      *convreq_for_suggestion_, params, &segments);
-  EXPECT_EQ(get_top_value(), "value_0");
-
-  reset_segments();
-  params.literal_on_top = false;  // literal_on_top is not passed.
-  segment->mutable_candidate(0)->attributes |=
-      Segment::Candidate::TYPING_CORRECTION;
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
-      *convreq_for_suggestion_, params, &segments);
-  EXPECT_EQ(get_top_value(), "value_0");
-  EXPECT_EQ(get_second_value(), "value_1");
-
-  params.literal_on_top = true;  // literal_on_top is passed.
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
-      *convreq_for_suggestion_, params, &segments);
-  EXPECT_EQ(get_top_value(), "value_3");
-  EXPECT_EQ(get_second_value(), "value_0");
-
-  // test literal-at-least-second behavior
-  reset_segments();
-  params.literal_on_top = false;
-  params.literal_at_least_second = true;
-  segment->mutable_candidate(0)->attributes |=
-      Segment::Candidate::TYPING_CORRECTION;
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
-      *convreq_for_suggestion_, params, &segments);
-  EXPECT_EQ(get_top_value(), "value_0");     // top is typing correction.
-  EXPECT_EQ(get_second_value(), "value_3");  // second is literal.
-}
-
-TEST_F(DictionaryPredictorTest, MaybeSuppressAggressiveTypingCorrection2Test) {
   std::vector<Result> results(10);
   std::vector<absl::Nonnull<const Result *>> results_ptrs;
 
@@ -1879,38 +1736,60 @@ TEST_F(DictionaryPredictorTest, MaybeSuppressAggressiveTypingCorrection2Test) {
 
   TypingCorrectionMixingParams params;
 
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection2(
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
       *convreq_for_suggestion_, params, &results_ptrs);
   EXPECT_EQ(get_top_value(), "value_0");
 
   results[0].types |= PredictionType::TYPING_CORRECTION;
   reset_results_ptrs();
   params.literal_on_top = false;  // literal_on_top is not passed.
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection2(
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
       *convreq_for_suggestion_, params, &results_ptrs);
   EXPECT_EQ(get_top_value(), "value_0");
   EXPECT_EQ(get_second_value(), "value_1");
 
   params.literal_on_top = true;  // literal_on_top is passed.
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection2(
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
       *convreq_for_suggestion_, params, &results_ptrs);
   EXPECT_EQ(get_top_value(), "value_3");
   EXPECT_EQ(get_second_value(), "value_0");
 
   // test literal-at-least-second behavior
-  results[0].types |= PredictionType::TYPING_CORRECTION;
   reset_results_ptrs();
+  results[0].types |= PredictionType::TYPING_CORRECTION;
   params.literal_on_top = false;
   params.literal_at_least_second = true;
-  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection2(
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
       *convreq_for_suggestion_, params, &results_ptrs);
   EXPECT_EQ(get_top_value(), "value_0");     // top is typing correction.
   EXPECT_EQ(get_second_value(), "value_3");  // second is literal.
+
+  // Tests fix_legacy_typing_correction_behavior
+  reset_results_ptrs();
+  params.literal_on_top = true;
+  params.literal_at_least_second = false;
+  results[3].candidate_attributes = Segment::Candidate::TYPING_CORRECTION;
+
+  request_->mutable_decoder_experiment_params()
+      ->set_fix_legacy_typing_correction_behavior(true);
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
+      *convreq_for_suggestion_, params, &results_ptrs);
+  EXPECT_EQ(get_top_value(), "value_4");
+  EXPECT_EQ(get_second_value(), "value_0");
+
+  reset_results_ptrs();
+  params.literal_on_top = false;
+  params.literal_at_least_second = true;
+  results[3].candidate_attributes = Segment::Candidate::TYPING_CORRECTION;
+  DictionaryPredictorTestPeer::MaybeSuppressAggressiveTypingCorrection(
+      *convreq_for_suggestion_, params, &results_ptrs);
+  EXPECT_EQ(get_top_value(), "value_0");     // top is typing correction.
+  EXPECT_EQ(get_second_value(), "value_4");  // second is literal.
 }
 
 TEST_F(DictionaryPredictorTest, Rescoring) {
-  auto rescorer = std::make_unique<prediction::MockRescorer>();
-  EXPECT_CALL(*rescorer, RescoreResults(_, _, _))
+  engine::MockSupplementalModel supplemental_model;
+  EXPECT_CALL(supplemental_model, RescoreResults(_, _, _))
       .WillRepeatedly(
           Invoke([](const ConversionRequest &request, const Segments &segments,
                     absl::Span<Result> results) {
@@ -1918,7 +1797,7 @@ TEST_F(DictionaryPredictorTest, Rescoring) {
           }));
 
   auto data_and_predictor =
-      std::make_unique<MockDataAndPredictor>(std::move(rescorer));
+      std::make_unique<MockDataAndPredictor>(&supplemental_model);
   const DictionaryPredictorTestPeer &predictor =
       data_and_predictor->predictor();
   MockAggregator *aggregator = data_and_predictor->mutable_aggregator();
@@ -1973,13 +1852,15 @@ TEST_F(DictionaryPredictorTest, AddRescoringDebugDescription) {
 }
 
 TEST_F(DictionaryPredictorTest, DoNotRescoreHandwriting) {
-  // Use StrictMock to make sure that RescoreResults() is not be called
-  auto rescorer = std::make_unique<StrictMock<prediction::MockRescorer>>();
+  // Use StrictMock to make sure that RescoreResults(), PostCorrect() are not be
+  // called
+  StrictMock<engine::MockSupplementalModel> supplemental_model;
   auto data_and_predictor =
-      std::make_unique<MockDataAndPredictor>(std::move(rescorer));
+      std::make_unique<MockDataAndPredictor>(&supplemental_model);
 
-  // Fill handwriting request and composer
+  // Fill handwriting config, request and composer
   {
+    config_->set_use_typing_correction(false);
     request_->set_zero_query_suggestion(true);
     request_->set_mixed_conversion(false);
     request_->set_kana_modifier_insensitive_conversion(false);
@@ -2009,103 +1890,28 @@ TEST_F(DictionaryPredictorTest, DoNotRescoreHandwriting) {
   predictor.PredictForRequest(*convreq_for_prediction_, &segments);
 }
 
-TEST_F(DictionaryPredictorTest, TypingCorrectionMixingParamsTest) {
+TEST_F(DictionaryPredictorTest, DoNotApplyPostCorrection) {
+  // Use StrictMock to make sure that PostCorrect() is not be called
+  engine::MockSupplementalModel supplemental_model;
+  auto data_and_predictor =
+      std::make_unique<MockDataAndPredictor>(&supplemental_model);
+
+  config_->set_use_typing_correction(false);
+
+  const DictionaryPredictorTestPeer &predictor =
+      data_and_predictor->predictor();
+  MockAggregator *aggregator = data_and_predictor->mutable_aggregator();
+  EXPECT_CALL(*aggregator, AggregateResults(_, _))
+      .WillOnce(Return(std::vector<Result>{
+          CreateResult5("かんじ", "かん字", 0, prediction::UNIGRAM,
+                        Token::NONE),
+          CreateResult5("かんじ", "漢字", 500, prediction::UNIGRAM,
+                        Token::NONE)}));
+
   Segments segments;
-  InitSegmentsWithKey("かつこうのもの", &segments);  // 7 chars.
+  InitSegmentsWithKey("かんじ", &segments);
 
-  Segment *segment = segments.mutable_conversion_segment(0);
-  auto *candidate = segment->add_candidate();
-  candidate->key = "かつこうのもの";
-
-  std::vector<Result> corrected = {
-      CreateResult6("がっこう", "学校", 100, 100, prediction::TYPING_CORRECTION,
-                    Token::NONE),
-      CreateResult6("かっこう", "格好", 100, 200, prediction::TYPING_CORRECTION,
-                    Token::NONE),
-  };
-
-  corrected[0].typing_correction_score = 1.0;
-  corrected[1].typing_correction_score = 0.5;
-
-  const std::vector<Result> base = {
-      CreateResult6("かつこう", "かつこう", 200, 300, prediction::UNIGRAM,
-                    Token::NONE),
-      CreateResult6("かつこう", "カツコウ", 200, 300, prediction::UNIGRAM,
-                    Token::NONE),
-
-  };
-
-  auto *params = request_->mutable_decoder_experiment_params();
-
-  auto reset_params = [&]() {
-    params->set_typing_correction_literal_on_top_correction_score_max_diff(0.0);
-    params->set_typing_correction_literal_on_top_conversion_cost_max_diff(0);
-    params->set_typing_correction_literal_on_top_length_score_max_diff(0.0);
-    params->set_typing_correction_literal_on_top_length_decay(0.0);
-  };
-
-  reset_params();
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_on_top);
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_at_least_second);
-
-  // literal-on-top with correction_score_max_diff
-  params->set_typing_correction_literal_on_top_correction_score_max_diff(2.0);
-  EXPECT_TRUE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                              segments, base, corrected)
-                  .literal_on_top);
-
-  params->set_typing_correction_literal_on_top_correction_score_max_diff(0.5);
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_on_top);
-
-  reset_params();
-
-  // literal-on-top with conversion_cost_max_diff
-  params->set_typing_correction_literal_on_top_conversion_cost_max_diff(500);
-  EXPECT_TRUE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                              segments, base, corrected)
-                  .literal_on_top);
-
-  params->set_typing_correction_literal_on_top_conversion_cost_max_diff(50);
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_on_top);
-
-  reset_params();
-
-  // literal-on-top with
-  // typing_correction_literal_on_top_length_score_max_diff and
-  // typing_correction_literal_on_top_length_decay
-  params->set_typing_correction_literal_on_top_length_score_max_diff(2.0);
-  params->set_typing_correction_literal_on_top_length_decay(0.8);
-
-  // 2.0 * (0.8)^(7-3) < 1.0
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_on_top);
-
-  // 2.0 * (0.9)^(7-3) > 1.0
-  params->set_typing_correction_literal_on_top_length_decay(0.9);
-  EXPECT_TRUE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                              segments, base, corrected)
-                  .literal_on_top);
-
-  // 1.5 * (0.9)^(7-3) < 1.0
-  params->set_typing_correction_literal_on_top_length_score_max_diff(1.5);
-  EXPECT_FALSE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                               segments, base, corrected)
-                   .literal_on_top);
-
-  // literal at least second.
-  params->set_typing_correction_literal_at_least_second(true);
-  EXPECT_TRUE(GetTypingCorrectionMixingParams(*convreq_for_suggestion_,
-                                              segments, base, corrected)
-                  .literal_at_least_second);
+  predictor.PredictForRequest(*convreq_for_prediction_, &segments);
 }
 
 TEST_F(DictionaryPredictorTest, MaybeGetPreviousTopResultTest) {
@@ -2170,6 +1976,23 @@ TEST_F(DictionaryPredictorTest, MaybeGetPreviousTopResultTest) {
         cur_top, *convreq_for_suggestion_, segments);
     EXPECT_TRUE(result);
     EXPECT_EQ(result->value, "志賀高原");
+  }
+
+  // top is partial
+  {
+    InitSegmentsWithKey("しが", &segments);
+    EXPECT_FALSE(predictor.MaybeGetPreviousTopResult(
+        init_top, *convreq_for_suggestion_, segments));
+
+    InitSegmentsWithKey("しがこう", &segments);
+    EXPECT_FALSE(predictor.MaybeGetPreviousTopResult(
+        pre_top, *convreq_for_suggestion_, segments));
+
+    InitSegmentsWithKey("しがこうげ", &segments);
+    auto cur_top_prefix = cur_top;
+    cur_top_prefix.types |= PREFIX;
+    EXPECT_FALSE(predictor.MaybeGetPreviousTopResult(
+        cur_top_prefix, *convreq_for_suggestion_, segments));
   }
 
   // Already consistent.

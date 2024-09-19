@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "base/util.h"
 #include "converter/converter_interface.h"
 #include "converter/immutable_converter_interface.h"
@@ -50,7 +51,6 @@
 #include "prediction/result.h"
 #include "prediction/zero_query_dict.h"
 #include "request/conversion_request.h"
-
 
 namespace mozc {
 namespace prediction {
@@ -73,12 +73,6 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
   std::vector<Result> AggregateTypingCorrectedResults(
       const ConversionRequest &request,
       const Segments &segments) const override;
-
-#if MOZC_ENABLE_NGRAM_RESCORING
-  void SetNgramModelForTesting(const ngram::NgramModelInterface *ngram_model) {
-    ngram_model_ = ngram_model;
-  }
-#endif  // MOZC_ENABLE_NGRAM_RESCORING
 
  private:
   class PredictiveLookupCallback;
@@ -125,8 +119,8 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
       const ZeroQueryDict &dict, std::vector<ZeroQueryResult> *results);
 
   static void AppendZeroQueryToResults(
-      const std::vector<ZeroQueryResult> &candidates, uint16_t lid,
-      uint16_t rid, std::vector<Result> *results);
+      absl::Span<const ZeroQueryResult> candidates, uint16_t lid, uint16_t rid,
+      std::vector<Result> *results);
 
   PredictionTypes AggregatePredictionForZeroQuery(
       const ConversionRequest &request, const Segments &segments,
@@ -229,12 +223,6 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
                                           const Segments &segments,
                                           std::vector<Result> *results) const;
 
-#if MOZC_ENABLE_NGRAM_RESCORING
-  void AggregateZeroQueryNgramPrediction(const ConversionRequest &request,
-                                         const Segments &segments,
-                                         std::vector<Result> *results) const;
-#endif  // MOZC_ENABLE_NGRAM_RESCORING
-
   void AggregateEnglishPrediction(const ConversionRequest &request,
                                   const Segments &segments,
                                   std::vector<Result> *results) const;
@@ -245,6 +233,9 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
 
   bool AggregateNumberCandidates(const ConversionRequest &request,
                                  const Segments &segments,
+                                 std::vector<Result> *results) const;
+
+  bool AggregateNumberCandidates(absl::string_view input_key,
                                  std::vector<Result> *results) const;
 
   // Note that this look up is done with raw input string rather than query
@@ -287,6 +278,10 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
       const ConversionRequest &request, const Segments &segments,
       int zip_code_id, int unknown_id, std::vector<Result> *results);
 
+  void MaybePopulateTypingCorrectionPenalty(const ConversionRequest &request,
+                                            const Segments &segments,
+                                            std::vector<Result> *results) const;
+
   // Test peer to access private methods
   friend class DictionaryPredictionAggregatorTestPeer;
 
@@ -305,7 +300,6 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
   NumberDecoder number_decoder_;
   std::unique_ptr<PredictionAggregatorInterface>
       single_kanji_prediction_aggregator_;
-
 };
 
 }  // namespace prediction

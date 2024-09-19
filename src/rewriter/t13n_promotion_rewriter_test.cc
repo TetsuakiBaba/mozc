@@ -29,6 +29,7 @@
 
 #include "rewriter/t13n_promotion_rewriter.h"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -40,9 +41,11 @@
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
 #include "request/request_test_util.h"
+#include "rewriter/rewriter_interface.h"
 #include "rewriter/transliteration_rewriter.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
+#include "transliteration/transliteration.h"
 
 namespace mozc {
 namespace {
@@ -186,6 +189,57 @@ TEST_F(T13nPromotionRewriterTest, PromoteKatakana) {
   EXPECT_EQ(segment->candidate(promoted_index).rid, 1);
 }
 
+TEST_F(T13nPromotionRewriterTest, PromoteKatakanaOffset) {
+  T13nPromotionRewriter rewriter;
+
+  Segments segments;
+  composer_.SetInputMode(transliteration::HIRAGANA);
+  composer_.SetPreeditTextForTestOnly("きょう");
+  Segment *segment = segments.push_back_segment();
+  segment->set_key("きょう");
+  AddCandidateWithValue("今日", segment);
+  AddCandidateWithValue("きょう", segment);
+  AddCandidateWithValue("強", segment);
+  AddCandidateWithValue("教", segment);
+  AddCandidateWithValue("凶", segment);
+  AddCandidateWithValue("卿", segment);
+  AddCandidateWithValue("京", segment);
+  AddCandidateWithValue("キョウ", segment);
+
+  const int katakana_index = GetCandidateIndexByValue("キョウ", *segment);
+  EXPECT_EQ(katakana_index, 7);
+
+  EXPECT_TRUE(t13n_rewriter_->Rewrite(mobile_conv_request_, &segments));
+
+  {
+    mobile_request_.mutable_decoder_experiment_params()
+        ->set_katakana_promotion_offset(-1);
+    // Not promoted
+    EXPECT_FALSE(rewriter.Rewrite(mobile_conv_request_, &segments));
+  }
+  {
+    mobile_request_.mutable_decoder_experiment_params()
+        ->set_katakana_promotion_offset(6);
+    EXPECT_TRUE(rewriter.Rewrite(mobile_conv_request_, &segments));
+    const int promoted_index = GetCandidateIndexByValue("キョウ", *segment);
+    EXPECT_EQ(promoted_index, 6);
+  }
+  {
+    mobile_request_.mutable_decoder_experiment_params()
+        ->set_katakana_promotion_offset(1);
+    EXPECT_TRUE(rewriter.Rewrite(mobile_conv_request_, &segments));
+    const int promoted_index = GetCandidateIndexByValue("キョウ", *segment);
+    EXPECT_EQ(promoted_index, 1);
+  }
+  {
+    mobile_request_.mutable_decoder_experiment_params()
+        ->set_katakana_promotion_offset(0);
+    EXPECT_TRUE(rewriter.Rewrite(mobile_conv_request_, &segments));
+    const int promoted_index = GetCandidateIndexByValue("キョウ", *segment);
+    EXPECT_EQ(promoted_index, 0);
+  }
+}
+
 TEST_F(T13nPromotionRewriterTest, KatakanaIsAlreadyRankedHigh) {
   T13nPromotionRewriter rewriter;
 
@@ -321,6 +375,54 @@ TEST_F(T13nPromotionRewriterTest, PromoteNumberT13n) {
   EXPECT_TRUE(rewriter.Rewrite(mobile_conv_request_, &segments));
   EXPECT_LE(GetCandidateIndexByValue("１２", segments.conversion_segment(0)),
             4);
+}
+
+TEST_F(T13nPromotionRewriterTest, PromoteKatakanaWithMinPerCost) {
+  T13nPromotionRewriter rewriter;
+
+  for (int min_per_char_cost = 0; min_per_char_cost <= 2000;
+       min_per_char_cost += 500) {
+    for (int override_min_per_char_cost : {0, min_per_char_cost + 500}) {
+      for (int cost = 1000; cost <= 8000; cost += 1000) {
+        Segments segments;
+
+        composer_.SetInputMode(transliteration::HIRAGANA);
+        composer_.SetPreeditTextForTestOnly("けるでぃよろわ");
+        Segment *segment = segments.push_back_segment();
+        segment->set_key("けるでぃよろわ");
+        AddCandidateWithValue("ケルデヨロワ", segment);    // TYPING CORRECTION
+        AddCandidateWithValue("いろは", segment);          // USER_HISTORY
+        AddCandidateWithValue("毛ルディ寄ろわ", segment);  // Best literal
+        AddCandidateWithValue("いろは", segment);
+        EXPECT_TRUE(t13n_rewriter_->Rewrite(mobile_conv_request_, &segments));
+
+        mobile_request_.mutable_decoder_experiment_params()
+            ->set_katakana_promotion_min_per_char_cost(min_per_char_cost);
+        mobile_request_.mutable_decoder_experiment_params()
+            ->set_katakana_override_min_per_char_cost(
+                override_min_per_char_cost);
+
+        segment->mutable_candidate(0)->attributes |=
+            Segment::Candidate::TYPING_CORRECTION;
+        segment->mutable_candidate(1)->attributes |=
+            Segment::Candidate::USER_HISTORY_PREDICTION;
+        segment->mutable_candidate(2)->cost = cost;
+
+        EXPECT_TRUE(rewriter.Rewrite(mobile_conv_request_, &segments));
+
+        int expected = 4;  // not triggered.
+        const int per_char_cost = cost / 7;
+        if (min_per_char_cost > 0 && per_char_cost >= min_per_char_cost) {
+          expected = (override_min_per_char_cost > min_per_char_cost &&
+                      per_char_cost >= override_min_per_char_cost)
+                         ? 2   // at literal
+                         : 3;  // next to literal
+        }
+        EXPECT_EQ(GetCandidateIndexByValue("ケルディヨロワ", *segment),
+                  expected);
+      }
+    }
+  }
 }
 
 }  // namespace
