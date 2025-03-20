@@ -36,12 +36,12 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -134,8 +134,8 @@ class KeyCorrectedNodeListBuilder : public BaseNodeListBuilder {
 
 void InsertCorrectedNodes(size_t pos, const std::string &key,
                           const ConversionRequest &request,
-                          const KeyCorrector *key_corrector,
-                          const DictionaryInterface *dictionary,
+                          const KeyCorrector *key_corrector,  // nullable
+                          const DictionaryInterface &dictionary,
                           Lattice *lattice) {
   if (key_corrector == nullptr) {
     return;
@@ -147,7 +147,7 @@ void InsertCorrectedNodes(size_t pos, const std::string &key,
   }
   KeyCorrectedNodeListBuilder builder(pos, key, key_corrector,
                                       lattice->node_allocator());
-  dictionary->LookupPrefix(absl::string_view(str, length), request, &builder);
+  dictionary.LookupPrefix(absl::string_view(str, length), request, &builder);
   if (builder.tail() != nullptr) {
     builder.tail()->bnext = nullptr;
   }
@@ -297,8 +297,9 @@ std::vector<absl::string_view> GetBoundaryInfo(const Segment::Candidate &c) {
 // Here,"渡しの" will be filtered if there is a cost gap from "私の"
 class FirstInnerSegmentCandidateChecker {
  public:
-  explicit FirstInnerSegmentCandidateChecker(const Segment &target_segment)
-      : target_segment_(target_segment) {}
+  explicit FirstInnerSegmentCandidateChecker(const Segment &target_segment,
+                                             int cost_max_diff)
+      : target_segment_(target_segment), cost_max_diff_(cost_max_diff) {}
 
   bool IsGoodCandidate(const Segment::Candidate &c) {
     if (c.key.size() != target_segment_.key().size() &&
@@ -308,15 +309,7 @@ class FirstInnerSegmentCandidateChecker {
       return false;
     }
 
-    if (!Util::ContainsScriptType(c.value, Util::KANJI)) {
-      // Do not filter non-kanji candidate.
-      // It may have unusual candidate cost.
-      return true;
-    }
-
-    constexpr int kCostDiff = 3107;  // 500*log(500)
-    if (const auto &f = min_cost_for_key_.find(c.key);
-        f != min_cost_for_key_.end() && c.cost - f->second > kCostDiff) {
+    if (min_cost_.has_value() && c.cost - *min_cost_ > cost_max_diff_) {
       return false;
     }
 
@@ -329,9 +322,10 @@ class FirstInnerSegmentCandidateChecker {
 
     if (Util::ContainsScriptType(c.value, Util::KANJI)) {
       // Do not use non-kanji entry's cost. Sometimes it is too small.
-      auto [it, inserted] = min_cost_for_key_.try_emplace(c.key, c.cost);
-      if (!inserted) {
-        it->second = std::min(it->second, c.cost);
+      if (!min_cost_.has_value()) {
+        min_cost_ = c.cost;
+      } else {
+        *min_cost_ = std::min(*min_cost_, c.cost);
       }
     }
   }
@@ -345,7 +339,8 @@ class FirstInnerSegmentCandidateChecker {
   }
 
   const Segment &target_segment_;
-  absl::flat_hash_map<std::string, int> min_cost_for_key_;
+  int cost_max_diff_;
+  std::optional<int> min_cost_;
   Trie<bool> trie_;
 };
 
@@ -354,25 +349,18 @@ class FirstInnerSegmentCandidateChecker {
 ImmutableConverter::ImmutableConverter(const engine::Modules &modules)
     : dictionary_(modules.GetDictionary()),
       suffix_dictionary_(modules.GetSuffixDictionary()),
-      suppression_dictionary_(modules.GetSuppressionDictionary()),
+      user_dictionary_(modules.GetUserDictionary()),
       connector_(modules.GetConnector()),
       segmenter_(modules.GetSegmenter()),
       pos_matcher_(modules.GetPosMatcher()),
       pos_group_(modules.GetPosGroup()),
       suggestion_filter_(modules.GetSuggestionFilter()),
-      first_name_id_(pos_matcher_->GetFirstNameId()),
-      last_name_id_(pos_matcher_->GetLastNameId()),
-      number_id_(pos_matcher_->GetNumberId()),
-      unknown_id_(pos_matcher_->GetUnknownId()),
+      first_name_id_(pos_matcher_.GetFirstNameId()),
+      last_name_id_(pos_matcher_.GetLastNameId()),
+      number_id_(pos_matcher_.GetNumberId()),
+      unknown_id_(pos_matcher_.GetUnknownId()),
       last_to_first_name_transition_cost_(
-          connector_.GetTransitionCost(last_name_id_, first_name_id_)) {
-  DCHECK(dictionary_);
-  DCHECK(suffix_dictionary_);
-  DCHECK(suppression_dictionary_);
-  DCHECK(segmenter_);
-  DCHECK(pos_matcher_);
-  DCHECK(pos_group_);
-}
+          connector_.GetTransitionCost(last_name_id_, first_name_id_)) {}
 
 void ImmutableConverter::InsertDummyCandidates(Segment *segment,
                                                size_t expand_size) const {
@@ -504,8 +492,8 @@ bool ImmutableConverter::ResegmentArabicNumberAndSuffix(
   for (const Node *compound_node = bnode; compound_node != nullptr;
        compound_node = compound_node->bnext) {
     if (!compound_node->value.empty() && !compound_node->key.empty() &&
-        pos_matcher_->IsNumber(compound_node->lid) &&
-        !pos_matcher_->IsNumber(compound_node->rid) &&
+        pos_matcher_.IsNumber(compound_node->lid) &&
+        !pos_matcher_.IsNumber(compound_node->rid) &&
         IsNumber(compound_node->value[0]) && IsNumber(compound_node->key[0])) {
       std::string number_value, number_key;
       std::string suffix_value, suffix_key;
@@ -695,7 +683,7 @@ bool ImmutableConverter::ResegmentPersonalName(size_t pos,
           if ((lnode->value.size() + rnode->value.size()) ==
                   compound_node->value.size() &&
               (lnode->value + rnode->value) == compound_node->value &&
-              segmenter_->IsBoundary(*lnode, *rnode, false)) {  // Constraint 3.
+              segmenter_.IsBoundary(*lnode, *rnode, false)) {  // Constraint 3.
             const int32_t cost = lnode->wcost + GetCost(lnode, rnode);
             if (cost < best_cost) {  // choose the smallest ones
               best_last_name_node = lnode;
@@ -810,20 +798,20 @@ Node *ImmutableConverter::Lookup(const int begin_pos,
   if (is_reverse) {
     BaseNodeListBuilder builder(lattice->node_allocator(),
                                 lattice->node_allocator()->max_nodes_size());
-    dictionary_->LookupReverse(key_substr, request, &builder);
+    dictionary_.LookupReverse(key_substr, request, &builder);
     result_node = builder.result();
   } else {
     if (is_prediction) {
       NodeListBuilderWithCacheEnabled builder(
           lattice->node_allocator(), lattice->cache_info(begin_pos) + 1);
-      dictionary_->LookupPrefix(key_substr, request, &builder);
+      dictionary_.LookupPrefix(key_substr, request, &builder);
       result_node = builder.result();
       lattice->SetCacheInfo(begin_pos, key_substr.length());
     } else {
       // When cache feature is not used, look up normally
       BaseNodeListBuilder builder(lattice->node_allocator(),
                                   lattice->node_allocator()->max_nodes_size());
-      dictionary_->LookupPrefix(key_substr, request, &builder);
+      dictionary_.LookupPrefix(key_substr, request, &builder);
       result_node = builder.result();
     }
   }
@@ -1280,7 +1268,7 @@ namespace {
 class NodeListBuilderForPredictiveNodes : public BaseNodeListBuilder {
  public:
   NodeListBuilderForPredictiveNodes(NodeAllocator *allocator, int limit,
-                                    const PosMatcher *pos_matcher)
+                                    const PosMatcher &pos_matcher)
       : BaseNodeListBuilder(allocator, limit), pos_matcher_(pos_matcher) {}
 
   ~NodeListBuilderForPredictiveNodes() override = default;
@@ -1292,22 +1280,21 @@ class NodeListBuilderForPredictiveNodes : public BaseNodeListBuilder {
     int additional_cost = kPredictiveNodeDefaultPenalty;
 
     // Bonus for suffix word.
-    if (pos_matcher_->IsSuffixWord(node->rid) &&
-        pos_matcher_->IsSuffixWord(node->lid)) {
+    if (pos_matcher_.IsSuffixWord(node->rid) &&
+        pos_matcher_.IsSuffixWord(node->lid)) {
       constexpr int kSuffixWordBonus = 700;
       additional_cost -= kSuffixWordBonus;
     }
 
     // Penalty for unique noun word.
-    if (pos_matcher_->IsUniqueNoun(node->rid) ||
-        pos_matcher_->IsUniqueNoun(node->lid)) {
+    if (pos_matcher_.IsUniqueNoun(node->rid) ||
+        pos_matcher_.IsUniqueNoun(node->lid)) {
       constexpr int kUniqueNounPenalty = 500;
       additional_cost += kUniqueNounPenalty;
     }
 
     // Penalty for number.
-    if (pos_matcher_->IsNumber(node->rid) ||
-        pos_matcher_->IsNumber(node->lid)) {
+    if (pos_matcher_.IsNumber(node->rid) || pos_matcher_.IsNumber(node->lid)) {
       constexpr int kNumberPenalty = 4000;
       additional_cost += kNumberPenalty;
     }
@@ -1318,7 +1305,7 @@ class NodeListBuilderForPredictiveNodes : public BaseNodeListBuilder {
   }
 
  private:
-  const PosMatcher *pos_matcher_;
+  const PosMatcher &pos_matcher_;
 };
 
 }  // namespace
@@ -1333,8 +1320,8 @@ void ImmutableConverter::MakeLatticeNodesForPredictiveNodes(
     conversion_key += segment.key();
   }
   DCHECK_NE(std::string::npos, key.find(conversion_key));
-  std::vector<std::string> conversion_key_chars;
-  Util::SplitStringToUtf8Chars(conversion_key, &conversion_key_chars);
+  const std::vector<std::string> conversion_key_chars =
+      Util::SplitStringToUtf8Chars(conversion_key);
 
   // *** Current behaviors ***
   // - Starts suggestion from 6 characters, which is conservative.
@@ -1360,7 +1347,7 @@ void ImmutableConverter::MakeLatticeNodesForPredictiveNodes(
       NodeListBuilderForPredictiveNodes builder(
           lattice->node_allocator(),
           lattice->node_allocator()->max_nodes_size(), pos_matcher_);
-      suffix_dictionary_->LookupPredictive(
+      suffix_dictionary_.LookupPredictive(
           absl::string_view(key.data() + pos, key.size() - pos), request,
           &builder);
       if (builder.result() != nullptr) {
@@ -1390,7 +1377,7 @@ void ImmutableConverter::MakeLatticeNodesForPredictiveNodes(
       NodeListBuilderForPredictiveNodes builder(
           lattice->node_allocator(),
           lattice->node_allocator()->max_nodes_size(), pos_matcher_);
-      dictionary_->LookupPredictive(
+      dictionary_.LookupPredictive(
           absl::string_view(key.data() + pos, key.size() - pos), request,
           &builder);
       if (builder.result() != nullptr) {
@@ -1474,7 +1461,7 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest &request,
   if (is_reverse) {
     // Reverse lookup for each prefix string in key is slow with current
     // implementation, so run it for them at once and cache the result.
-    dictionary_->PopulateReverseLookupCache(key);
+    dictionary_.PopulateReverseLookupCache(key);
   }
 
   bool is_valid_lattice = true;
@@ -1492,7 +1479,7 @@ bool ImmutableConverter::MakeLattice(const ConversionRequest &request,
 
   if (is_reverse) {
     // No reverse look up will happen afterwards.
-    dictionary_->ClearReverseLookupCache();
+    dictionary_.ClearReverseLookupCache();
   }
 
   // Nodes look up for real time conversion for desktop.
@@ -1615,8 +1602,8 @@ bool ImmutableConverter::MakeLatticeNodesForHistorySegments(
 
         // Must be in the same POS group.
         // http://b/issue?id=2977618
-        if (pos_group_->GetPosGroup(candidate.lid) !=
-            pos_group_->GetPosGroup(compound_node->lid)) {
+        if (pos_group_.GetPosGroup(candidate.lid) !=
+            pos_group_.GetPosGroup(compound_node->lid)) {
           continue;
         }
 
@@ -1707,7 +1694,7 @@ void ImmutableConverter::MakeLatticeNodesForConversionSegments(
       // is assigned.
       if (!history_key.empty() && pos == history_key.size()) {
         for (Node *node = rnode; node != nullptr; node = node->bnext) {
-          if (pos_matcher_->IsAcceptableParticleAtBeginOfSegment(node->lid) &&
+          if (pos_matcher_.IsAcceptableParticleAtBeginOfSegment(node->lid) &&
               node->lid == node->rid) {  // not a compound.
             node->attributes |= Node::STARTS_WITH_PARTICLE;
           }
@@ -1733,12 +1720,12 @@ void ImmutableConverter::ApplyPrefixSuffixPenalty(
     // If history-segments is non-empty, we can make the
     // penalty smaller so that history context is more likely
     // selected.
-    node->wcost += segmenter_->GetPrefixPenalty(node->lid);
+    node->wcost += segmenter_.GetPrefixPenalty(node->lid);
   }
 
   for (Node *node = lattice->end_nodes(key.size()); node != nullptr;
        node = node->enext) {
-    node->wcost += segmenter_->GetSuffixPenalty(node->rid);
+    node->wcost += segmenter_.GetSuffixPenalty(node->rid);
   }
 }
 
@@ -1886,7 +1873,7 @@ bool ImmutableConverter::IsSegmentEndNode(const ConversionRequest &request,
   }
 
   // Grammatically segmented.
-  if (segmenter_->IsBoundary(*node, *node->next, is_single_segment)) {
+  if (segmenter_.IsBoundary(*node, *node->next, is_single_segment)) {
     return true;
   }
 
@@ -1930,9 +1917,8 @@ void ImmutableConverter::InsertCandidates(const ConversionRequest &request,
 
   const bool is_single_segment =
       (type == SINGLE_SEGMENT || type == FIRST_INNER_SEGMENT);
-  NBestGenerator nbest_generator(suppression_dictionary_, segmenter_,
-                                 connector_, pos_matcher_, &lattice,
-                                 suggestion_filter_);
+  NBestGenerator nbest_generator(user_dictionary_, segmenter_, connector_,
+                                 pos_matcher_, lattice, suggestion_filter_);
 
   std::string original_key;
   for (const Segment &segment : segments->conversion_segments()) {
@@ -2035,86 +2021,12 @@ void ImmutableConverter::InsertCandidatesForConversion(
   }
 }
 
-void ImmutableConverter::InsertCandidatesForRealtime(
-    const ConversionRequest &request, const Lattice &lattice,
-    absl::Span<const uint16_t> group, Segments *segments) const {
-  Segment *target_segment = segments->mutable_conversion_segment(0);
-
-  Segments tmp_segments = *segments;
-  {
-    // Candidates for the whole path
-    constexpr int kMaxSize = 3;
-    InsertCandidates(request, &tmp_segments, lattice, group, kMaxSize,
-                     SINGLE_SEGMENT);
-
-    // InsertCandidates for SINGLE_SEGMENT should insert at least one candidate.
-    DCHECK_GT(tmp_segments.conversion_segment(0).candidates_size(), 0);
-    const auto &top_cand = tmp_segments.conversion_segment(0).candidate(0);
-    const std::vector<absl::string_view> top_boundary =
-        GetBoundaryInfo(top_cand);
-    for (int i = 0; i < tmp_segments.conversion_segment(0).candidates_size();
-         ++i) {
-      const auto &c = tmp_segments.conversion_segment(0).candidate(i);
-      constexpr int kCostDiff = 2302;  // 500*log(100)
-      if (c.cost - top_cand.cost > kCostDiff) {
-        continue;
-      }
-      if (i != 0 && GetBoundaryInfo(c) == top_boundary) {
-        // Skip to add the similar candidates.
-        continue;
-      }
-      Segment::Candidate *candidate = target_segment->add_candidate();
-      *candidate = c;
-    }
-  }
-  tmp_segments.mutable_conversion_segment(0)->clear_candidates();
-
-  {
-    // Candidates for the first segment for each n-best path.
-    InsertCandidates(request, &tmp_segments, lattice, group,
-                     request.max_conversion_candidates_size() -
-                         target_segment->candidates_size(),
-                     FIRST_INNER_SEGMENT);
-    Trie<bool> added;
-    constexpr bool kPlaceholderValue = true;
-    constexpr int kMaxSingleSegmentCandidateSize = 5;
-    int single_segment_candidate_count = 0;
-    for (int i = 0; i < tmp_segments.conversion_segment(0).candidates_size();
-         ++i) {
-      const auto &c = tmp_segments.conversion_segment(0).candidate(i);
-      bool data;
-      size_t key_length;
-      if (added.LongestMatch(c.value, &data, &key_length)) {
-        // Prefix is already added
-        continue;
-      }
-      if (c.key.size() == target_segment->key().size() &&
-          c.key.size() != c.content_key.size() &&
-          single_segment_candidate_count++ >= kMaxSingleSegmentCandidateSize) {
-        // The key is for single segment (ex. きょうの, etc)
-        // Skip to add verbose candidates (凶の, 鏡の, 興の, etc)
-        continue;
-      }
-      Segment::Candidate *candidate = target_segment->add_candidate();
-      *candidate = c;
-      if (c.key.size() != target_segment->key().size()) {
-        // Suffix penalty is not added for the prefix path.
-        const int32_t suffix_penalty =
-            segmenter_->GetSuffixPenalty(candidate->rid);
-        candidate->wcost += suffix_penalty;
-        candidate->cost += suffix_penalty;
-      }
-      added.AddEntry(c.value, kPlaceholderValue);
-    }
-  }
-}
-
 void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
     const ConversionRequest &request, const Lattice &lattice,
     absl::Span<const uint16_t> group, Segments *segments) const {
+  constexpr int kSingleSegmentCharCoverage = 12;
   Segment *target_segment = segments->mutable_conversion_segment(0);
   absl::flat_hash_set<std::string> added;
-
   Segments tmp_segments = *segments;
   {
     // Candidates for the whole path
@@ -2122,11 +2034,14 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
     InsertCandidates(request, &tmp_segments, lattice, group, kMaxSize,
                      SINGLE_SEGMENT);
 
-    // InsertCandidates for SINGLE_SEGMENT should insert at least one candidate.
+    // At least one candidate should be added.
+    // Skip to add the similar candidates unless the char coverage is still
+    // available.
     DCHECK_GT(tmp_segments.conversion_segment(0).candidates_size(), 0);
     const auto &top_cand = tmp_segments.conversion_segment(0).candidate(0);
     const std::vector<absl::string_view> top_boundary =
         GetBoundaryInfo(top_cand);
+    int remaining_char_coverage = kSingleSegmentCharCoverage;
     for (int i = 0; i < tmp_segments.conversion_segment(0).candidates_size();
          ++i) {
       const auto &c = tmp_segments.conversion_segment(0).candidate(i);
@@ -2134,15 +2049,16 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
       if (c.cost - top_cand.cost > kCostDiff) {
         continue;
       }
-      const std::vector<absl::string_view> boundary = GetBoundaryInfo(c);
-      if (boundary.size() > 2 && i != 0 && boundary == top_boundary) {
-        // Skip to add the similar candidates excepting the case that the
-        // top candidate has the simple structure (i.e., "のXX", etc)
+      if (i != 0 && GetBoundaryInfo(c) == top_boundary &&
+          remaining_char_coverage < 0) {
+        // Skip to add the similar candidates when there is no remaining
+        // coverage.
         continue;
       }
       Segment::Candidate *candidate = target_segment->add_candidate();
       *candidate = c;
       added.insert(c.value);
+      remaining_char_coverage -= Util::CharsLen(c.value);
     }
   }
   tmp_segments.mutable_conversion_segment(0)->clear_candidates();
@@ -2153,7 +2069,9 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
                      request.max_conversion_candidates_size() -
                          target_segment->candidates_size(),
                      FIRST_INNER_SEGMENT);
-    FirstInnerSegmentCandidateChecker checker(*target_segment);
+    constexpr int kMaxCostDiffForFirstInnerSegment = 3107;  // 500*log(500)
+    FirstInnerSegmentCandidateChecker checker(*target_segment,
+                                              kMaxCostDiffForFirstInnerSegment);
     for (int i = 0; i < tmp_segments.conversion_segment(0).candidates_size();
          ++i) {
       Segment::Candidate *c =
@@ -2164,7 +2082,7 @@ void ImmutableConverter::InsertCandidatesForRealtimeWithCandidateChecker(
       if (c->key.size() != target_segment->key().size()) {
         // Explicitly add suffix penalty, since the penalty is not added for non
         // end nodes.
-        const int32_t suffix_penalty = segmenter_->GetSuffixPenalty(c->rid);
+        const int32_t suffix_penalty = segmenter_.GetSuffixPenalty(c->rid);
         c->wcost += suffix_penalty;
         c->cost += suffix_penalty;
       }
@@ -2186,21 +2104,15 @@ void ImmutableConverter::InsertCandidatesForPrediction(
   const size_t max_candidates_size = request.max_conversion_candidates_size();
 
   if (!request.create_partial_candidates()) {
-    // Desktop (or physical keyboard in Mobile)
+    // Desktop (or physical keyboard / handwriting in Mobile)
     InsertCandidates(request, segments, lattice, group, max_candidates_size,
                      SINGLE_SEGMENT);
     return;
   }
 
   // Mobile
-  if (request.request()
-          .decoder_experiment_params()
-          .enable_realtime_conversion_candidate_checker()) {
-    InsertCandidatesForRealtimeWithCandidateChecker(request, lattice, group,
-                                                    segments);
-  } else {
-    InsertCandidatesForRealtime(request, lattice, group, segments);
-  }
+  InsertCandidatesForRealtimeWithCandidateChecker(request, lattice, group,
+                                                  segments);
 }
 
 void ImmutableConverter::MakeGroup(const Segments &segments,

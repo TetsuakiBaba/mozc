@@ -30,6 +30,8 @@
 # Visibility:  please choose a more appropriate default for the package,
 # and update any rules that should be different.
 
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
     "mozc_cc_binary",
@@ -39,12 +41,11 @@ load(
     "mozc_py_library",
 )
 
-package(default_visibility = ["//:__subpackages__"])
+package(default_visibility = ["//visibility:private"])
 
 proto_library(
     name = "user_history_predictor_proto",
     srcs = ["user_history_predictor.proto"],
-    visibility = ["//visibility:private"],
 )
 
 cc_proto_library(
@@ -55,10 +56,13 @@ cc_proto_library(
 mozc_cc_library(
     name = "predictor_interface",
     hdrs = ["predictor_interface.h"],
+    visibility = [
+        "//converter:__pkg__",
+        "//engine:__pkg__",
+    ],
     deps = [
         "//converter:segments",
         "//request:conversion_request",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -67,6 +71,11 @@ mozc_cc_library(
     name = "user_history_predictor",
     srcs = ["user_history_predictor.cc"],
     hdrs = ["user_history_predictor.h"],
+    visibility = [
+        "//converter:__pkg__",
+        "//engine:__pkg__",
+        "//session:__pkg__",
+    ],
     deps = [
         ":predictor_interface",
         ":user_history_predictor_cc_proto",
@@ -85,7 +94,6 @@ mozc_cc_library(
         "//converter:segments",
         "//dictionary:dictionary_interface",
         "//dictionary:pos_matcher",
-        "//dictionary:suppression_dictionary",
         "//engine:modules",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
@@ -94,7 +102,6 @@ mozc_cc_library(
         "//storage:encrypted_string_storage",
         "//storage:lru_cache",
         "//testing:friend_test",
-        "//usage_stats",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/hash",
@@ -127,12 +134,13 @@ mozc_cc_test(
         "//base/file:temp_dir",
         "//base/strings:unicode",
         "//composer",
+        "//composer:query",
         "//composer:table",
         "//config:config_handler",
         "//converter:segments",
         "//data_manager/testing:mock_data_manager",
+        "//dictionary:dictionary_interface",
         "//dictionary:dictionary_mock",
-        "//dictionary:suppression_dictionary",
         "//engine:modules",
         "//engine:supplemental_model_interface",
         "//engine:supplemental_model_mock",
@@ -144,8 +152,6 @@ mozc_cc_test(
         "//storage:lru_cache",
         "//testing:gunit_main",
         "//testing:mozctest",
-        "//usage_stats",
-        "//usage_stats:usage_stats_testing_util",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
@@ -161,6 +167,10 @@ mozc_cc_library(
         "dictionary_predictor.cc",
     ],
     hdrs = ["dictionary_predictor.h"],
+    visibility = [
+        "//converter:__pkg__",
+        "//engine:__pkg__",
+    ],
     deps = [
         ":dictionary_prediction_aggregator",
         ":prediction_aggregator_interface",
@@ -185,7 +195,6 @@ mozc_cc_library(
         "//request:conversion_request",
         "//request:request_util",
         "//transliteration",
-        "//usage_stats",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -221,7 +230,6 @@ mozc_cc_library(
 mozc_cc_library(
     name = "prediction_aggregator_interface",
     hdrs = ["prediction_aggregator_interface.h"],
-    visibility = ["//visibility:private"],
     deps = [
         ":result",
         "//converter:segments",
@@ -235,7 +243,6 @@ mozc_cc_library(
         "dictionary_prediction_aggregator.cc",
     ],
     hdrs = ["dictionary_prediction_aggregator.h"],
-    visibility = ["//visibility:private"],
     deps = [
         ":number_decoder",
         ":prediction_aggregator_interface",
@@ -262,6 +269,7 @@ mozc_cc_library(
         "//request:conversion_request",
         "//request:request_util",
         "//transliteration",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
@@ -290,7 +298,7 @@ mozc_cc_test(
         "//converter:converter_mock",
         "//converter:immutable_converter_interface",
         "//converter:segments",
-        "//data_manager:data_manager_interface",
+        "//data_manager",
         "//data_manager/testing:mock_data_manager",
         "//dictionary:dictionary_interface",
         "//dictionary:dictionary_mock",
@@ -347,8 +355,6 @@ mozc_cc_test(
         "//request:request_test_util",
         "//testing:gunit_main",
         "//testing:mozctest",
-        "//usage_stats",
-        "//usage_stats:usage_stats_testing_util",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
@@ -364,7 +370,7 @@ mozc_cc_library(
         "single_kanji_prediction_aggregator.cc",
     ],
     hdrs = ["single_kanji_prediction_aggregator.h"],
-    visibility = ["//engine:__subpackages__"],
+    visibility = ["//engine:__pkg__"],
     deps = [
         ":prediction_aggregator_interface",
         ":result",
@@ -372,7 +378,7 @@ mozc_cc_library(
         "//base/strings:assign",
         "//composer",
         "//converter:segments",
-        "//data_manager:data_manager_interface",
+        "//data_manager",
         "//dictionary:pos_matcher",
         "//dictionary:single_kanji_dictionary",
         "//protocol:commands_cc_proto",
@@ -412,6 +418,10 @@ mozc_cc_library(
     name = "predictor",
     srcs = ["predictor.cc"],
     hdrs = ["predictor.h"],
+    visibility = [
+        "//converter:__pkg__",
+        "//engine:__pkg__",
+    ],
     deps = [
         ":predictor_interface",
         "//base:util",
@@ -420,7 +430,6 @@ mozc_cc_library(
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//request:conversion_request",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -458,6 +467,11 @@ mozc_cc_library(
     name = "suggestion_filter",
     srcs = ["suggestion_filter.cc"],
     hdrs = ["suggestion_filter.h"],
+    visibility = [
+        "//converter:__pkg__",
+        "//data_manager:__pkg__",
+        "//engine:__pkg__",
+    ],
     deps = [
         "//base:hash",
         "//base:util",
@@ -473,7 +487,7 @@ mozc_cc_library(
 mozc_cc_library(
     name = "zero_query_dict",
     hdrs = ["zero_query_dict.h"],
-    visibility = ["//engine:__subpackages__"],
+    visibility = ["//engine:__pkg__"],
     deps = [
         "//base/container:serialized_string_array",
         "@com_google_absl//absl/strings",
@@ -483,7 +497,6 @@ mozc_cc_library(
 mozc_cc_test(
     name = "zero_query_dict_test",
     srcs = ["zero_query_dict_test.cc"],
-    visibility = ["//visibility:private"],
     deps = [
         ":zero_query_dict",
         "//base/container:serialized_string_array",
@@ -495,6 +508,10 @@ mozc_cc_test(
 mozc_cc_binary(
     name = "gen_suggestion_filter_main",
     srcs = ["gen_suggestion_filter_main.cc"],
+    visibility = [
+        "//:__subpackages__",
+        "//data_manager:__subpackages__",
+    ],
     deps = [
         "//base:codegen_bytearray_stream",
         "//base:file_stream",
@@ -513,21 +530,20 @@ mozc_cc_binary(
 mozc_py_library(
     name = "gen_zero_query_util",
     srcs = ["gen_zero_query_util.py"],
-    deps = [
-        "//build_tools:code_generator_util",
-        "//build_tools:serialized_string_array_builder",
-    ],
+    deps = ["//build_tools:serialized_string_array_builder"],
 )
 
 mozc_py_binary(
     name = "gen_zero_query_number_data",
     srcs = ["gen_zero_query_number_data.py"],
+    visibility = ["//data_manager:__subpackages__"],
     deps = [":gen_zero_query_util"],
 )
 
 mozc_py_binary(
     name = "gen_zero_query_data",
     srcs = ["gen_zero_query_data.py"],
+    visibility = ["//data_manager:__subpackages__"],
     deps = [
         ":gen_zero_query_util",
         "//build_tools:code_generator_util",
@@ -555,7 +571,6 @@ mozc_cc_test(
     deps = [
         ":number_decoder",
         "//testing:gunit_main",
-        "//testing:mozctest",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
     ],

@@ -61,7 +61,6 @@
 #include "rewriter/variants_rewriter.h"
 #include "storage/lru_storage.h"
 #include "transliteration/transliteration.h"
-#include "usage_stats/usage_stats.h"
 
 namespace mozc {
 namespace {
@@ -300,13 +299,13 @@ std::string FeatureKey::Number(uint16_t type) {
   return StrJoinWithTabs("N", absl::StrCat(type));
 }
 
-bool IsNumberSegment(const Segment &seg) {
-  if (seg.key().empty()) {
+bool IsNumberSegment(const Segment &segment) {
+  if (segment.key().empty()) {
     return false;
   }
   bool is_number = true;
-  for (size_t i = 0; i < seg.key().size(); ++i) {
-    if (!isdigit(static_cast<unsigned char>(seg.key()[i]))) {
+  for (size_t i = 0; i < segment.key().size(); ++i) {
+    if (!isdigit(static_cast<unsigned char>(segment.key()[i]))) {
       is_number = false;
       break;
     }
@@ -318,9 +317,9 @@ void GetValueByType(const Segment *segment,
                     NumberUtil::NumberString::Style style,
                     std::string *output) {
   DCHECK(output);
-  for (size_t i = 0; i < segment->candidates_size(); ++i) {
-    if (segment->candidate(i).style == style) {
-      *output = segment->candidate(i).value;
+  for (const Segment::Candidate *candidate : segment->candidates()) {
+    if (candidate->style == style) {
+      *output = candidate->value;
       return;
     }
   }
@@ -482,10 +481,10 @@ bool UserSegmentHistoryRewriter::SortCandidates(
 }
 
 UserSegmentHistoryRewriter::UserSegmentHistoryRewriter(
-    const PosMatcher *pos_matcher, const PosGroup *pos_group)
+    const PosMatcher &pos_matcher, const PosGroup &pos_group)
     : storage_(std::make_unique<LruStorage>()),
-      pos_matcher_(pos_matcher),
-      pos_group_(pos_group) {
+      pos_matcher_(&pos_matcher),
+      pos_group_(&pos_group) {
   Reload();
 
   CHECK_EQ(sizeof(uint32_t), sizeof(FeatureValue));
@@ -565,16 +564,19 @@ UserSegmentHistoryRewriter::Score UserSegmentHistoryRewriter::GetScore(
   return score;
 }
 
-// Returns true if |lhs| candidate can be replaceable with |rhs|.
+// Returns true if |best_candidate| can be replaceable with |target_candidate|.
+// Here, "best candidate" means the candidate from converter before applying
+// personalization.
 bool UserSegmentHistoryRewriter::Replaceable(
-    const ConversionRequest &request, const Segment::Candidate &lhs,
-    const Segment::Candidate &rhs) const {
-  const bool same_functional_value =
-      (lhs.functional_value() == rhs.functional_value());
-  const bool same_pos_group =
-      (pos_group_->GetPosGroup(lhs.lid) == pos_group_->GetPosGroup(rhs.lid));
+    const ConversionRequest &request, const Segment::Candidate &best_candidate,
+    const Segment::Candidate &target_candidate) const {
+  const bool same_functional_value = (best_candidate.functional_value() ==
+                                      target_candidate.functional_value());
+  const bool same_pos_group = (pos_group_->GetPosGroup(best_candidate.lid) ==
+                               pos_group_->GetPosGroup(target_candidate.lid));
   return (same_functional_value &&
-          (same_pos_group || IsT13NCandidate(lhs) || IsT13NCandidate(rhs)));
+          (same_pos_group || IsT13NCandidate(best_candidate) ||
+           IsT13NCandidate(target_candidate)));
 }
 
 void UserSegmentHistoryRewriter::RememberNumberPreference(
@@ -630,13 +632,12 @@ void UserSegmentHistoryRewriter::RememberFirstCandidate(
       ((candidate.attributes & Segment::Candidate::RERANKED) != 0);
 
   // Compare the POS group and Functional value.
-  // if "is_replaceable" is true, it means that  the target candidate can
-  // "SAFELY" be replaceable with the top candidate.
+  // if "is_replaceable_with_top" is true, it means that  the target candidate
+  // can "SAFELY" be replaceable with the top candidate.
   const int top_index = GetDefaultCandidateIndex(seg);
   const bool is_replaceable_with_top =
       ((top_index == 0) ||
        Replaceable(request, seg.candidate(top_index), candidate));
-
   FeatureKey fkey(segments, *pos_matcher_, segment_index);
   Insert(fkey.LeftRight(all_key, all_value), force_insert, revert_entries);
   Insert(fkey.LeftLeft(all_key, all_value), force_insert, revert_entries);
@@ -691,7 +692,7 @@ void UserSegmentHistoryRewriter::RememberFirstCandidate(
 
 bool UserSegmentHistoryRewriter::IsAvailable(const ConversionRequest &request,
                                              const Segments &segments) const {
-  if (request.config().incognito_mode()) {
+  if (request.incognito_mode()) {
     MOZC_VLOG(2) << "incognito_mode";
     return false;
   }
@@ -720,11 +721,21 @@ bool UserSegmentHistoryRewriter::IsAvailable(const ConversionRequest &request,
 // Returns segments for learning.
 // Inner segments boundary will be expanded.
 Segments UserSegmentHistoryRewriter::MakeLearningSegmentsFromInnerSegments(
-    const Segments &segments) {
+    const ConversionRequest &request, const Segments &segments) {
+  auto inner_segments_info_available = [&request](const Segment::Candidate &c) {
+    if (request.request()
+            .decoder_experiment_params()
+            .apply_single_inner_segment_boundary()) {
+      return !c.inner_segment_boundary.empty();
+    } else {
+      return c.inner_segment_boundary.size() > 1;
+    }
+  };
+
   Segments ret;
   for (const Segment &segment : segments) {
     const Segment::Candidate &candidate = segment.candidate(0);
-    if (candidate.inner_segment_boundary.size() <= 1) {
+    if (!inner_segments_info_available(candidate)) {
       // No inner segment info
       Segment *seg = ret.add_segment();
       *seg = segment;
@@ -776,7 +787,7 @@ void UserSegmentHistoryRewriter::Finish(const ConversionRequest &request,
 
   const Segments target_segments =
       UseInnerSegments(request)
-          ? MakeLearningSegmentsFromInnerSegments(*segments)
+          ? MakeLearningSegmentsFromInnerSegments(request, *segments)
           : *segments;
   std::vector<Segments::RevertEntry> revert_entries;
   for (size_t i = target_segments.history_segments_size();
@@ -801,10 +812,6 @@ void UserSegmentHistoryRewriter::Finish(const ConversionRequest &request,
     Segments::RevertEntry *new_entry = segments->push_back_revert_entry();
     *new_entry = entry;
   }
-
-  // update usage stats here
-  usage_stats::UsageStats::SetInteger("UserSegmentHistoryEntrySize",
-                                      static_cast<int>(storage_->used_size()));
 }
 
 bool UserSegmentHistoryRewriter::Sync() {

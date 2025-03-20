@@ -39,7 +39,7 @@
 #include "absl/strings/string_view.h"
 #include "base/util.h"
 #include "converter/segments.h"
-#include "data_manager/data_manager_interface.h"
+#include "data_manager/data_manager.h"
 #include "data_manager/serialized_dictionary.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
@@ -157,7 +157,7 @@ std::string A11yDescriptionRewriter::GetKanaCharacterLabel(
 }
 
 A11yDescriptionRewriter::A11yDescriptionRewriter(
-    const DataManagerInterface *data_manager)
+    const DataManager &data_manager)
     : small_letter_set_(
           {// Small hiragana
            U'ぁ', U'ぃ', U'ぅ', U'ぇ', U'ぉ', U'ゃ', U'ゅ', U'ょ', U'っ', U'ゎ',
@@ -177,8 +177,8 @@ A11yDescriptionRewriter::A11yDescriptionRewriter(
           {U'ｯ', U'ﾂ'},
       }) {
   absl::string_view token_array_data, string_array_data;
-  data_manager->GetA11yDescriptionRewriterData(&token_array_data,
-                                               &string_array_data);
+  data_manager.GetA11yDescriptionRewriterData(&token_array_data,
+                                              &string_array_data);
   description_map_ = (token_array_data.empty() || string_array_data.empty())
                          ? nullptr
                          : std::make_unique<SerializedDictionary>(

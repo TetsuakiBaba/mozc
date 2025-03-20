@@ -40,7 +40,6 @@
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/pos_matcher.h"
-#include "dictionary/suppression_dictionary.h"
 #include "dictionary/user_dictionary.h"
 #include "dictionary/user_dictionary_storage.h"
 #include "dictionary/user_pos.h"
@@ -56,7 +55,6 @@
 namespace mozc {
 namespace {
 
-using dictionary::SuppressionDictionary;
 using dictionary::UserDictionary;
 using dictionary::UserPos;
 using ::testing::_;
@@ -99,22 +97,12 @@ class TestDataManager : public testing::MockDataManager {
 
 class UsageRewriterTest : public testing::TestWithTempUserProfile {
  protected:
-  UsageRewriterTest() {
-    convreq_.set_request(&request_);
-    convreq_.set_config(&config_);
-  }
+  UsageRewriterTest()
+      : pos_matcher_(data_manager_.GetPosMatcherData()),
+        user_dictionary_(UserPos::CreateFromDataManager(data_manager_),
+                         pos_matcher_) {}
 
-  void SetUp() override {
-    config::ConfigHandler::GetDefaultConfig(&config_);
-
-    data_manager_ = std::make_unique<testing::MockDataManager>();
-    test_data_manager_ = std::make_unique<TestDataManager>();
-    pos_matcher_.Set(data_manager_->GetPosMatcherData());
-    suppression_dictionary_ = std::make_unique<SuppressionDictionary>();
-    user_dictionary_ = std::make_unique<UserDictionary>(
-        UserPos::CreateFromDataManager(*data_manager_), pos_matcher_,
-        suppression_dictionary_.get());
-  }
+  void SetUp() override { config::ConfigHandler::GetDefaultConfig(&config_); }
 
   void TearDown() override {
     // just in case, reset the config
@@ -122,31 +110,36 @@ class UsageRewriterTest : public testing::TestWithTempUserProfile {
   }
 
   UsageRewriter *CreateUsageRewriter() const {
-    return new UsageRewriter(data_manager_.get(), user_dictionary_.get());
+    return new UsageRewriter(data_manager_, user_dictionary_);
   }
 
   UsageRewriter *CreateUsageRewriterWithTestDataManager() const {
-    return new UsageRewriter(test_data_manager_.get(), user_dictionary_.get());
+    return new UsageRewriter(test_data_manager_, user_dictionary_);
   }
 
-  ConversionRequest convreq_;
+  static ConversionRequest ConvReq(const config::Config &config,
+                                   const commands::Request &request) {
+    return ConversionRequestBuilder()
+        .SetConfig(config)
+        .SetRequest(request)
+        .Build();
+  }
+
+ private:
+  const testing::MockDataManager data_manager_;
+
+ protected:
   commands::Request request_;
   config::Config config_;
 
-  std::unique_ptr<SuppressionDictionary> suppression_dictionary_;
-  std::unique_ptr<UserDictionary> user_dictionary_;
-  std::unique_ptr<testing::MockDataManager> data_manager_;
-  std::unique_ptr<TestDataManager> test_data_manager_;
+  TestDataManager test_data_manager_;
   dictionary::PosMatcher pos_matcher_;
+  UserDictionary user_dictionary_;
 };
 
 TEST_F(UsageRewriterTest, ConstructorTest) {
-  EXPECT_CALL(*test_data_manager_, GetUsageRewriterData(_, _, _, _, _))
+  EXPECT_CALL(test_data_manager_, GetUsageRewriterData(_, _, _, _, _))
       .WillOnce(SetArgPointee<4>(""));
-  pos_matcher_.Set(test_data_manager_->GetPosMatcherData());
-  user_dictionary_ = std::make_unique<UserDictionary>(
-      UserPos::CreateFromDataManager(*test_data_manager_), pos_matcher_,
-      suppression_dictionary_.get());
 
   std::unique_ptr<UsageRewriter> rewriter(
       CreateUsageRewriterWithTestDataManager());
@@ -159,7 +152,8 @@ TEST_F(UsageRewriterTest, ConstructorTest) {
 
 TEST_F(UsageRewriterTest, CapabilityTest) {
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
-  EXPECT_EQ(rewriter->capability(convreq_),
+  const ConversionRequest convreq = ConvReq(config_, request_);
+  EXPECT_EQ(rewriter->capability(convreq),
             RewriterInterface::CONVERSION | RewriterInterface::PREDICTION);
 }
 
@@ -173,7 +167,8 @@ TEST_F(UsageRewriterTest, ConjugationTest) {
   seg->set_key("うたえば");
   AddCandidate("うたえば", "歌えば", "うたえ", "歌え", seg);
   AddCandidate("うたえば", "唱えば", "うたえ", "唄え", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  const ConversionRequest convreq = ConvReq(config_, request_);
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "歌う");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "唄う");
@@ -184,12 +179,13 @@ TEST_F(UsageRewriterTest, SingleSegmentSingleCandidateTest) {
   Segments segments;
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
   Segment *seg;
+  const ConversionRequest convreq = ConvReq(config_, request_);
 
   segments.Clear();
   seg = segments.push_back_segment();
   seg->set_key("あおい");
   AddCandidate("あおい", "青い", "あおい", "青い", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "青い");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
 
@@ -197,7 +193,7 @@ TEST_F(UsageRewriterTest, SingleSegmentSingleCandidateTest) {
   seg = segments.push_back_segment();
   seg->set_key("あおい");
   AddCandidate("あおい", "あああ", "あおい", "あああ", seg);
-  EXPECT_FALSE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_FALSE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_description, "");
 }
@@ -213,7 +209,8 @@ TEST_F(UsageRewriterTest, ConfigTest) {
     seg = segments.push_back_segment();
     seg->set_key("あおい");
     AddCandidate("あおい", "青い", "あおい", "青い", seg);
-    EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+    const ConversionRequest convreq = ConvReq(config_, request_);
+    EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   }
 
   {
@@ -224,7 +221,8 @@ TEST_F(UsageRewriterTest, ConfigTest) {
     seg = segments.push_back_segment();
     seg->set_key("あおい");
     AddCandidate("あおい", "青い", "あおい", "青い", seg);
-    EXPECT_FALSE(rewriter->Rewrite(convreq_, &segments));
+    const ConversionRequest convreq = ConvReq(config_, request_);
+    EXPECT_FALSE(rewriter->Rewrite(convreq, &segments));
   }
 
   {
@@ -235,7 +233,8 @@ TEST_F(UsageRewriterTest, ConfigTest) {
     seg = segments.push_back_segment();
     seg->set_key("あおい");
     AddCandidate("あおい", "青い", "あおい", "青い", seg);
-    EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+    const ConversionRequest convreq = ConvReq(config_, request_);
+    EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   }
 }
 
@@ -243,13 +242,14 @@ TEST_F(UsageRewriterTest, SingleSegmentMultiCandidatesTest) {
   Segments segments;
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
   Segment *seg;
+  const ConversionRequest convreq = ConvReq(config_, request_);
 
   segments.Clear();
   seg = segments.push_back_segment();
   seg->set_key("あおい");
   AddCandidate("あおい", "青い", "あおい", "青い", seg);
   AddCandidate("あおい", "蒼い", "あおい", "蒼い", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "青い");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "蒼い");
@@ -260,7 +260,7 @@ TEST_F(UsageRewriterTest, SingleSegmentMultiCandidatesTest) {
   seg->set_key("あおい");
   AddCandidate("あおい", "青い", "あおい", "青い", seg);
   AddCandidate("あおい", "あああ", "あおい", "あああ", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "青い");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "");
@@ -271,7 +271,7 @@ TEST_F(UsageRewriterTest, SingleSegmentMultiCandidatesTest) {
   seg->set_key("あおい");
   AddCandidate("あおい", "あああ", "あおい", "あああ", seg);
   AddCandidate("あおい", "青い", "あおい", "青い", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "青い");
@@ -282,7 +282,7 @@ TEST_F(UsageRewriterTest, SingleSegmentMultiCandidatesTest) {
   seg->set_key("あおい");
   AddCandidate("あおい", "あああ", "あおい", "あああ", seg);
   AddCandidate("あおい", "いいい", "あおい", "いいい", seg);
-  EXPECT_FALSE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_FALSE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "");
@@ -293,6 +293,7 @@ TEST_F(UsageRewriterTest, MultiSegmentsTest) {
   Segments segments;
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
   Segment *seg;
+  const ConversionRequest convreq = ConvReq(config_, request_);
 
   segments.Clear();
   seg = segments.push_back_segment();
@@ -304,7 +305,7 @@ TEST_F(UsageRewriterTest, MultiSegmentsTest) {
   seg->set_key("うたえば");
   AddCandidate("うたえば", "歌えば", "うたえ", "歌え", seg);
   AddCandidate("うたえば", "唱えば", "うたえ", "唄え", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "青い");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "蒼い");
@@ -321,13 +322,14 @@ TEST_F(UsageRewriterTest, SameUsageTest) {
   Segments segments;
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
   Segment *seg;
+  const ConversionRequest convreq = ConvReq(config_, request_);
 
   seg = segments.push_back_segment();
   seg->set_key("うたえば");
   AddCandidate("うたえば", "歌えば", "うたえ", "歌え", seg);
   AddCandidate("うたえば", "唱えば", "うたえ", "唄え", seg);
   AddCandidate("うたえば", "唱エバ", "うたえ", "唄え", seg);
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
   EXPECT_EQ(segments.conversion_segment(0).candidate(0).usage_title, "歌う");
   EXPECT_NE(segments.conversion_segment(0).candidate(0).usage_description, "");
   EXPECT_EQ(segments.conversion_segment(0).candidate(1).usage_title, "唄う");
@@ -366,7 +368,7 @@ TEST_F(UsageRewriterTest, CommentFromUserDictionary) {
     entry->set_pos(user_dictionary::UserDictionary::NOUN);
     entry->set_comment("アルパカコメント");
 
-    user_dictionary_->Load(storage.GetProto());
+    user_dictionary_.Load(storage.GetProto());
   }
 
   // Emulates the conversion of key="うま".
@@ -378,7 +380,8 @@ TEST_F(UsageRewriterTest, CommentFromUserDictionary) {
   AddCandidate("うま", "アルパカ", "うま", "アルパカ", seg);
 
   std::unique_ptr<UsageRewriter> rewriter(CreateUsageRewriter());
-  EXPECT_TRUE(rewriter->Rewrite(convreq_, &segments));
+  const ConversionRequest convreq = ConvReq(config_, request_);
+  EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
 
   // Result of ("うま", "Horse"). No comment is expected.
   const Segment::Candidate &cand0 = segments.conversion_segment(0).candidate(0);

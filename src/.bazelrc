@@ -1,3 +1,6 @@
+## Startup options
+startup  --windows_enable_symlinks  # ignored on non-Windows platforms
+
 ## Target platforms
 common:linux      --config=linux_env --define TARGET=oss_linux
 common:oss_linux  --config=linux_env --define TARGET=oss_linux
@@ -13,20 +16,9 @@ common:oss_windows  --config=windows_env --define TARGET=oss_windows
 common:prod_windows --config=windows_env --define TARGET=prod_windows
 common:prod_windows_dev --config=prod_windows --config=dev_channel
 
-common:android      --config=android_env --config=android_env_workspace --define TARGET=oss_android
-common:oss_android  --config=android_env --config=android_env_workspace --define TARGET=oss_android
-common:prod_android --config=android_env --config=android_env_workspace --define TARGET=prod_android
-common:oss_android_bzlmod --config=android_env --config=android_env_bzlmod --define TARGET=oss_android
-
-## Bzlmod options: Bzlmod is the default except for Android.
-common:linux_env   --config=bzlmod
-common:macos_env   --config=bzlmod
-common:windows_env --config=bzlmod
-common:android_env_bzlmod --config=bzlmod
-common:android_env_workspace --config=workspace
-
-common:bzlmod --enable_bzlmod
-common:workspace --noenable_bzlmod
+common:android      --config=android_env --define TARGET=oss_android
+common:oss_android  --config=android_env --define TARGET=oss_android
+common:prod_android --config=android_env --define TARGET=prod_android
 
 ## Dev channel
 build:dev_channel --define CHANNEL=dev
@@ -35,6 +27,11 @@ build:dev_channel --define CHANNEL=dev
 build:release_build --compilation_mode=opt
 # Temporarily disable this definition to work around the build failure on Linux.
 # build:release_build --copt=-DABSL_MIN_LOG_LEVEL=100
+
+## Clang-cl toolchain for Windows
+build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
+build:windows_env --extra_toolchains=@local_config_cc//:cc-toolchain-x64_x86_windows-clang-cl
+build:windows_env --host_platform=//:host-windows-clang-cl
 
 ## Compiler options
 common:linux_env   --config=compiler_gcc_like
@@ -67,39 +64,7 @@ test:macos_env   --test_tag_filters=-nomac
 build:windows_env --build_tag_filters=-nowin
 test:windows_env   --test_tag_filters=-nowin
 
-# A temporary workaround to make "mozc_win_build_rule" work.
-# Note that "incompatible_enable_cc_toolchain_resolution" is now enabled by
-# default. See https://github.com/bazelbuild/bazel/issues/7260
-# TODO: Re-enable "incompatible_enable_cc_toolchain_resolution"
-build:windows_env --noincompatible_enable_cc_toolchain_resolution
-
 # Android specific options
 build:android_env --copt "-DOS_ANDROID"
 build:android_env --build_tag_filters=-noandroid
-test:android_env   --test_tag_filters=-noandroid
-
-## Android workspace specific options
-build:android_env_workspace --android_crosstool_top=@androidndk//:toolchain
-# --fat_apk_cpu should be replaced with --android_platforms
-# https://github.com/bazelbuild/bazel/commit/05bea52ed3159aa5d15d967f5f56fc084a2b6c73
-build:android_env_workspace --fat_apk_cpu=armeabi-v7a,arm64-v8a,x86,x86_64 --incompatible_enable_android_toolchain_resolution=false
-build:android_env_workspace --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
-
-## Android Blzmod specific options
-### --experimental_google_legacy_api is required for all platforms.
-build:bzlmod --experimental_google_legacy_api
-
-build:android_env_bzlmod --experimental_enable_android_migration_apis
-build:android_env_bzlmod --android_sdk=@androidsdk//:sdk
-### arm64-v8a build (Arm 64bit)
-build:android_env_bzlmod --android_platforms=//bazel/android:arm64-v8a --cpu=arm64
-### x86_64 build (x86 64bit)
-# build:android_env_bzlmod --android_platforms=//bazel/android:x86_64 --cpu=x86_64
-### armeabi-v7a build (Arm 32bit)
-# build:android_env_bzlmod --android_platforms=//bazel/android:armeabi-v7a --cpu=armv7
-### x86 build (x86 32bit)
-# build:android_env_bzlmod --android_platforms=//bazel/android:x86 --cpu=x86_32
-
-# Note, although --android_platforms supports multiple platforms,
-# Abseil doesn't support it yet, and requires the --cpu option.
-# As the result, it is not possible to build both cpus with a single command.
+test:android_env  --test_tag_filters=-noandroid

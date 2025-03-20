@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -1121,30 +1122,23 @@ bool DateRewriter::RewriteAd(Segments::range segments_range,
 // `RewriteEra` which supports multiple segments without merging, this function
 // needs to produce a candidate for 2 segments (the era and the digits), which
 // isn't easy.
-bool DateRewriter::ResizeSegmentsForRewriteAd(
-    const ConversionRequest &request, Segments::const_range segments_range,
-    Segments *segments) const {
-  if (segments_range.empty()) {
-    LOG(WARNING) << "No candidates are found";
-    return false;
-  }
-  if (segments->resized()) {
-    // If the given segments are resized by user, don't modify anymore.
-    return false;
-  }
-
+std::optional<RewriterInterface::ResizeSegmentsRequest>
+DateRewriter::CheckResizeSegmentsForAd(const ConversionRequest &request,
+                                       const Segments &segments,
+                                       const size_t segment_index) const {
   // Find the first segment that ends with `kNenKey`.
   constexpr size_t kMaxSegments = 3;  // Only up to 3 segments.
   bool has_suffix = false;
   bool should_resize_last_segment = false;
   std::vector<absl::string_view> keys;
-  for (const Segment &segment : segments_range) {
+  for (const Segment &segment :
+       segments.conversion_segments().drop(segment_index)) {
     const absl::string_view key{segment.key()};
     if (auto pos = key.find(kNenKey); pos != absl::string_view::npos) {
       if (pos == 0 && keys.size() == 1) {
         // If the second key starts with the `kNenKey`, `RewriteAd()` can handle
         // it without resizing.
-        return false;
+        return std::nullopt;
       }
       pos += kNenKey.size();
       if (pos == key.size()) {
@@ -1158,41 +1152,33 @@ bool DateRewriter::ResizeSegmentsForRewriteAd(
       break;
     }
     if (keys.size() >= kMaxSegments - 1) {
-      return false;
+      return std::nullopt;
     }
     keys.push_back(key);
   }
   if (!has_suffix || (keys.size() <= 1 && !should_resize_last_segment)) {
-    return false;
+    return std::nullopt;
   }
   const std::string key = absl::StrJoin(keys, "");
   DCHECK(!key.empty());
+  const size_t key_len = Util::CharsLen(key);
+  if (key_len > std::numeric_limits<uint8_t>::max()) {
+    return std::nullopt;
+  }
+  const uint8_t segment_size = static_cast<uint8_t>(key_len);
 
   // Try to convert era to AD.
   const std::vector<std::pair<std::string, std::string>>
       results_anddescriptions = EraToAd(key);
   if (results_anddescriptions.empty()) {
-    return false;
+    return std::nullopt;
   }
 
-  return ResizeSegments(request, segments_range.begin(), key, segments);
-}
-
-// Extend or shrink the `*segments_begin` to the `key`.
-bool DateRewriter::ResizeSegments(const ConversionRequest &request,
-                                  Segments::const_iterator segments_begin,
-                                  const absl::string_view key,
-                                  Segments *segments) const {
-  const absl::string_view key0 = segments_begin->key();
-  DCHECK_NE(key.size(), key0.size());
-  const int diff = Util::CharsLen(key) - Util::CharsLen(key0);
-  const size_t segment_index = segments_begin - segments->all().begin();
-  if (!parent_converter_->ResizeSegment(segments, request, segment_index,
-                                        diff)) {
-    LOG(ERROR) << "Failed to merge conversion segments";
-    return false;
-  }
-  return true;
+  ResizeSegmentsRequest resize_request = {
+    .segment_index = segment_index,
+    .segment_sizes = { segment_size, 0, 0, 0, 0, 0, 0, 0 },
+  };
+  return resize_request;
 }
 
 namespace {
@@ -1231,7 +1217,7 @@ std::optional<std::string> VaridateNDigits(absl::string_view value, int n) {
 //      - All the meta candidates are based on "cd" (e.g. "CD", "Cd").
 //      Therefore to get "2223" we should access the raw input.
 // Prerequisite: |segments| has only one conversion segment.
-std::optional<std::string> GetNDigits(const composer::Composer &composer,
+std::optional<std::string> GetNDigits(const composer::ComposerData &composer,
                                       const Segments &segments, int n) {
   DCHECK_EQ(segments.conversion_segments_size(), 1);
   const Segment &segment = segments.conversion_segment(0);
@@ -1254,8 +1240,7 @@ std::optional<std::string> GetNDigits(const composer::Composer &composer,
   // Note that only one segment is in the Segments, but sometimes like
   // on partial conversion, segment.key() is different from the size of
   // the whole composition.
-  const std::string raw =
-      composer.GetRawSubString(0, Util::CharsLen(segment.key()));
+  const std::string raw = composer.GetRawSubString(0, segment.key_len());
   if (validated = VaridateNDigits(raw, n); validated) {
     return validated.value();
   }
@@ -1265,9 +1250,9 @@ std::optional<std::string> GetNDigits(const composer::Composer &composer,
 }
 }  // namespace
 
-bool DateRewriter::RewriteConsecutiveDigits(const composer::Composer &composer,
-                                            int insert_position,
-                                            Segments *segments) {
+bool DateRewriter::RewriteConsecutiveDigits(
+    const composer::ComposerData &composer, int insert_position,
+    Segments *segments) {
   if (segments->conversion_segments_size() != 1) {
     // This method rewrites a segment only when the segments has only
     // one conversion segment.
@@ -1503,6 +1488,31 @@ std::string GetExtraFormat(const dictionary::DictionaryInterface *dictionary) {
 }
 }  // namespace
 
+std::optional<RewriterInterface::ResizeSegmentsRequest>
+DateRewriter::CheckResizeSegmentsRequest(const ConversionRequest &request,
+                                         const Segments &segments) const {
+  if (!request.config().use_date_conversion()) {
+    MOZC_VLOG(2) << "no use_date_conversion";
+    return std::nullopt;
+  }
+
+  if (segments.resized()) {
+    // If the given segments are resized by user, don't modify anymore.
+    return std::nullopt;
+  }
+
+  for (size_t segment_index = 0;
+       segment_index < segments.conversion_segments_size(); ++segment_index) {
+    std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+        CheckResizeSegmentsForAd(request, segments, segment_index);
+    if (resize_request.has_value()) {
+      return resize_request;
+    }
+  }
+
+  return std::nullopt;
+}
+
 bool DateRewriter::Rewrite(const ConversionRequest &request,
                            Segments *segments) const {
   if (!request.config().use_date_conversion()) {
@@ -1510,9 +1520,12 @@ bool DateRewriter::Rewrite(const ConversionRequest &request,
     return false;
   }
 
-  bool modified = false;
-
   const Segments::range conversion_segments = segments->conversion_segments();
+  if (conversion_segments.empty()) {
+    return false;
+  }
+
+  bool modified = false;
   const std::string extra_format = GetExtraFormat(dictionary_);
   size_t num_done = 1;
   for (Segments::range rest_segments = conversion_segments;
@@ -1521,15 +1534,6 @@ bool DateRewriter::Rewrite(const ConversionRequest &request,
     if (seg == nullptr) {
       LOG(ERROR) << "Segment is nullptr";
       return false;
-    }
-
-    if (ResizeSegmentsForRewriteAd(request, rest_segments, segments)) {
-      // Return without further rewrites when segments were resized. Views for
-      // `segments` may be invalidated.
-      // `ResizeSegment()` calls `Rewriter::Rewrite()`, which recursively calls
-      // `DateRewriter::Rewrite()` with merged segments. Other rewrites were
-      // done by the recursive call.
-      return true;
     }
 
     if (RewriteAd(rest_segments, num_done) ||
@@ -1542,23 +1546,23 @@ bool DateRewriter::Rewrite(const ConversionRequest &request,
     num_done = 1;
   }
 
-  if (request.has_composer() && !conversion_segments.empty()) {
-    // Select the insert position by Romaji table.  Note:
-    // TOGGLE_FLICK_TO_HIRAGANA uses digits for Hiragana composing, date/time
-    // conversion is performed even when typing Hiragana characters.  Thus, it
-    // should not be promoted.
-    int insert_pos =
-        static_cast<int>(conversion_segments.front().candidates_size());
-    switch (request.request().special_romanji_table()) {
-      case commands::Request::QWERTY_MOBILE_TO_HALFWIDTHASCII:
-        insert_pos = 1;
-        break;
-      default:
-        break;
-    }
-    modified |=
-        RewriteConsecutiveDigits(request.composer(), insert_pos, segments);
+  // Select the insert position by Romaji table.  Note:
+  // TOGGLE_FLICK_TO_HIRAGANA uses digits for Hiragana composing, date/time
+  // conversion is performed even when typing Hiragana characters.  Thus, it
+  // should not be promoted.
+  int insert_pos =
+      static_cast<int>(conversion_segments.front().candidates_size());
+  switch (request.request().special_romanji_table()) {
+    case commands::Request::QWERTY_MOBILE_TO_HALFWIDTHASCII:
+    case commands::Request::FLICK_TO_NUMBER:
+    case commands::Request::TOGGLE_FLICK_TO_NUMBER:
+      insert_pos = 1;
+      break;
+    default:
+      break;
   }
+  modified |=
+      RewriteConsecutiveDigits(request.composer(), insert_pos, segments);
 
   return modified;
 }

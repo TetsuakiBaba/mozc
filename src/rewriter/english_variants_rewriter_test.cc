@@ -50,8 +50,10 @@ using ::mozc::dictionary::PosMatcher;
 
 class EnglishVariantsRewriterTest : public testing::TestWithTempUserProfile {
  protected:
+  EnglishVariantsRewriterTest()
+      : pos_matcher_(mock_data_manager_.GetPosMatcherData()) {}
+
   void SetUp() override {
-    pos_matcher_.Set(mock_data_manager_.GetPosMatcherData());
     rewriter_ = std::make_unique<EnglishVariantsRewriter>(pos_matcher_);
   }
 
@@ -66,11 +68,12 @@ class EnglishVariantsRewriterTest : public testing::TestWithTempUserProfile {
     return false;
   }
 
-  PosMatcher pos_matcher_;
-  std::unique_ptr<EnglishVariantsRewriter> rewriter_;
-
  private:
   const testing::MockDataManager mock_data_manager_;
+
+ protected:
+  const PosMatcher pos_matcher_;
+  std::unique_ptr<EnglishVariantsRewriter> rewriter_;
 };
 
 TEST_F(EnglishVariantsRewriterTest, ExpandEnglishVariants) {
@@ -164,11 +167,11 @@ TEST_F(EnglishVariantsRewriterTest, RewriteTest) {
   // 'Google Japan'
   {
     Segments segments;
-    ConversionRequest conversion_request;
     commands::Request request;
     request.mutable_decoder_experiment_params()
         ->set_english_variation_space_insertion_mode(1);
-    conversion_request.set_request(&request);
+    const ConversionRequest conversion_request =
+        ConversionRequestBuilder().SetRequest(request).Build();
 
     Segment *seg1 = segments.push_back_segment();
     Segment *seg2 = segments.push_back_segment();
@@ -216,11 +219,11 @@ TEST_F(EnglishVariantsRewriterTest, RewriteTest) {
   // '<NO CANDIDATE> Japan'
   {
     Segments segments;
-    ConversionRequest conversion_request;
     commands::Request request;
     request.mutable_decoder_experiment_params()
         ->set_english_variation_space_insertion_mode(1);
-    conversion_request.set_request(&request);
+    const ConversionRequest conversion_request =
+        ConversionRequestBuilder().SetRequest(request).Build();
 
     Segment *seg1 = segments.push_back_segment();
     Segment *seg2 = segments.push_back_segment();
@@ -249,11 +252,11 @@ TEST_F(EnglishVariantsRewriterTest, RewriteTest) {
   // 'ぐーぐるJapan'
   {
     Segments segments;
-    ConversionRequest conversion_request;
     commands::Request request;
     request.mutable_decoder_experiment_params()
         ->set_english_variation_space_insertion_mode(1);
-    conversion_request.set_request(&request);
+    const ConversionRequest conversion_request =
+        ConversionRequestBuilder().SetRequest(request).Build();
 
     Segment *seg1 = segments.push_back_segment();
     Segment *seg2 = segments.push_back_segment();
@@ -566,17 +569,19 @@ TEST_F(EnglishVariantsRewriterTest, FillConsumedKeySize) {
 }
 
 TEST_F(EnglishVariantsRewriterTest, MobileEnvironmentTest) {
-  ConversionRequest convreq;
   commands::Request request;
-  convreq.set_request(&request);
 
   {
     request.set_mixed_conversion(true);
+    const ConversionRequest convreq =
+        ConversionRequestBuilder().SetRequest(request).Build();
     EXPECT_EQ(rewriter_->capability(convreq), RewriterInterface::ALL);
   }
 
   {
     request.set_mixed_conversion(false);
+    const ConversionRequest convreq =
+        ConversionRequestBuilder().SetRequest(request).Build();
     EXPECT_EQ(rewriter_->capability(convreq), RewriterInterface::CONVERSION);
   }
 }

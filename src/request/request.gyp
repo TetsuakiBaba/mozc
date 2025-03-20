@@ -36,6 +36,7 @@
       'type': 'none',
       'dependencies': [
         '<(mozc_oss_src_dir)/base/base.gyp:base',
+        '<(mozc_oss_src_dir)/composer/composer.gyp:composer',
         '<(mozc_oss_src_dir)/config/config.gyp:config_handler',
         '<(mozc_oss_src_dir)/protocol/protocol.gyp:commands_proto',
         '<(mozc_oss_src_dir)/protocol/protocol.gyp:config_proto',
@@ -49,6 +50,16 @@
       ],
       'dependencies': [
         '<(mozc_oss_src_dir)/protocol/protocol.gyp:commands_proto',
+      ],
+    },
+    {
+      'target_name': 'conversion_request_test',
+      'type': 'static_library',
+      'sources': [
+        'conversion_request_test.cc',
+      ],
+      'dependencies': [
+        '<(mozc_oss_src_dir)/request/request.gyp:conversion_request',
       ],
     },
   ],

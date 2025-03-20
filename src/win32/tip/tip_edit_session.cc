@@ -44,7 +44,7 @@
 #include "base/win32/com.h"
 #include "base/win32/wide_char.h"
 #include "client/client_interface.h"
-#include "protocol/candidates.pb.h"
+#include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "win32/base/conversion_mode_util.h"
 #include "win32/base/deleter.h"
@@ -65,15 +65,14 @@ namespace win32 {
 namespace tsf {
 namespace {
 
-using ::mozc::commands::Candidates;
+using ::mozc::commands::CandidateWindow;
 using ::mozc::commands::DeletionRange;
 using ::mozc::commands::Output;
 using ::mozc::commands::SessionCommand;
-using Candidate = ::mozc::commands::Candidates_Candidate;
+using Candidate = ::mozc::commands::CandidateWindow_Candidate;
 using CompositionMode = ::mozc::commands::CompositionMode;
 using SpecialKey = ::mozc::commands::KeyEvent_SpecialKey;
 using CommandType = ::mozc::commands::SessionCommand::CommandType;
-using UsageStatsEvent = ::mozc::commands::SessionCommand::UsageStatsEvent;
 
 // This class is an implementation class for the ITfEditSession classes, which
 // is an observer for exclusively updating the text store of a TSF thread
@@ -434,17 +433,17 @@ bool UndoCommint(TipTextService *text_service, ITfContext *context) {
 }
 
 bool IsCandidateFocused(const Output &output, uint32_t candidate_id) {
-  if (!output.has_candidates()) {
+  if (!output.has_candidate_window()) {
     return false;
   }
-  const Candidates &candidates = output.candidates();
+  const CandidateWindow &candidate_window = output.candidate_window();
 
-  if (!candidates.has_focused_index()) {
+  if (!candidate_window.has_focused_index()) {
     return false;
   }
-  const uint32_t focused_index = candidates.focused_index();
-  for (size_t i = 0; i < candidates.candidate_size(); ++i) {
-    const Candidate &candidate = candidates.candidate(i);
+  const uint32_t focused_index = candidate_window.focused_index();
+  for (size_t i = 0; i < candidate_window.candidate_size(); ++i) {
+    const Candidate &candidate = candidate_window.candidate(i);
     if (candidate.index() != focused_index) {
       continue;
     }
@@ -722,23 +721,6 @@ bool TipEditSession::OnRendererCallbackAsync(TipTextService *text_service,
       command.set_type(type);
       command.set_id(candidate_id);
       return OnSessionCommandAsync(text_service, context, command);
-    }
-    case SessionCommand::USAGE_STATS_EVENT: {
-      const UsageStatsEvent event_id = static_cast<UsageStatsEvent>(lparam);
-      TipPrivateContext *private_context =
-          text_service->GetPrivateContext(context);
-      if (private_context == nullptr) {
-        return false;
-      }
-      SessionCommand command;
-      command.set_type(type);
-      command.set_usage_stats_event(event_id);
-      Output output_ignored;  // Discard the response in this case.
-      if (!private_context->GetClient()->SendCommand(command,
-                                                     &output_ignored)) {
-        return false;
-      }
-      return true;
     }
     default:
       return false;

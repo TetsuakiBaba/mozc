@@ -46,13 +46,12 @@
 #include "base/strings/assign.h"
 #include "base/vlog.h"
 #include "converter/segments.h"
-#include "data_manager/data_manager_interface.h"
+#include "data_manager/data_manager.h"
 #include "data_manager/emoji_data.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_util.h"
-#include "usage_stats/usage_stats.h"
 
 // EmojiRewriter:
 // Converts HIRAGANA strings to emoji characters, if they are names of emojis.
@@ -141,7 +140,7 @@ std::vector<std::unique_ptr<Segment::Candidate>> CreateEmojiData(
 }
 }  // namespace
 
-EmojiRewriter::EmojiRewriter(const DataManagerInterface &data_manager) {
+EmojiRewriter::EmojiRewriter(const DataManager &data_manager) {
   absl::string_view string_array_data;
   data_manager.GetEmojiRewriterData(&token_array_data_, &string_array_data);
   DCHECK(SerializedStringArray::VerifyData(string_array_data));
@@ -165,28 +164,6 @@ bool EmojiRewriter::Rewrite(const ConversionRequest &request,
 
   CHECK(segments != nullptr);
   return RewriteCandidates(segments);
-}
-
-void EmojiRewriter::Finish(const ConversionRequest &request,
-                           Segments *segments) {
-  if (!request.config().use_emoji_conversion()) {
-    return;
-  }
-
-  // Update usage stats
-  for (const Segment &segment : segments->conversion_segments()) {
-    // Ignores segments which are not converted or not committed.
-    if (segment.candidates_size() == 0 ||
-        segment.segment_type() != Segment::FIXED_VALUE) {
-      continue;
-    }
-
-    // Check if the chosen candidate (index 0) is an emoji candidate.
-    // The Mozc converter replaces committed candidates into the 0-th index.
-    if (IsEmojiCandidate(segment.candidate(0))) {
-      usage_stats::UsageStats::IncrementCount("CommitEmoji");
-    }
-  }
 }
 
 bool EmojiRewriter::IsEmojiCandidate(const Segment::Candidate &candidate) {

@@ -41,7 +41,7 @@
 #include "base/vlog.h"
 #include "base/win32/wide_char.h"
 #include "client/client_interface.h"
-#include "protocol/candidates.pb.h"
+#include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
 #include "protocol/renderer_style.pb.h"
@@ -62,19 +62,6 @@ namespace {
 const COLORREF kDefaultBackgroundColor = RGB(0xff, 0xff, 0xff);
 const UINT_PTR kIdDelayShowHideTimer = 100;
 
-bool SendUsageStatsEvent(client::SendCommandInterface *command_sender,
-                         const SessionCommand::UsageStatsEvent &event) {
-  if (command_sender == nullptr) {
-    return false;
-  }
-  SessionCommand command;
-  command.set_type(SessionCommand::USAGE_STATS_EVENT);
-  command.set_usage_stats_event(event);
-  MOZC_VLOG(2) << "SendUsageStatsEvent " << command;
-  Output dummy_output;
-  return command_sender->SendCommand(command, &dummy_output);
-}
-
 void FillSolidRect(HDC dc, const RECT *rect, COLORREF color) {
   COLORREF old_color = ::SetBkColor(dc, color);
   if (old_color != CLR_INVALID) {
@@ -91,7 +78,7 @@ void FillSolidRect(HDC dc, const RECT *rect, COLORREF color) {
 
 InfolistWindow::InfolistWindow()
     : send_command_interface_(nullptr),
-      candidates_(new commands::Candidates),
+      candidate_window_(new commands::CandidateWindow),
       text_renderer_(TextRenderer::Create()),
       style_(new RendererStyle),
       metrics_changed_(false),
@@ -154,7 +141,7 @@ Size InfolistWindow::DoPaint(HDC dc) {
     ::SetBkMode(dc, TRANSPARENT);
   }
   const RendererStyle::InfolistStyle &infostyle = style_->infolist_style();
-  const InformationList &usages = candidates_->usages();
+  const InformationList &usages = candidate_window_->usages();
 
   int ypos = infostyle.window_border();
 
@@ -207,7 +194,7 @@ Size InfolistWindow::DoPaint(HDC dc) {
 
 Size InfolistWindow::DoPaintRow(HDC dc, int row, int ypos) {
   const RendererStyle::InfolistStyle &infostyle = style_->infolist_style();
-  const InformationList &usages = candidates_->usages();
+  const InformationList &usages = candidate_window_->usages();
   const RendererStyle::TextStyle &title_style = infostyle.title_style();
   const RendererStyle::TextStyle &desc_style = infostyle.description_style();
   const int title_width =
@@ -330,14 +317,9 @@ void InfolistWindow::DelayShow(UINT mseconds) {
   visible_ = true;
   KillTimer(kIdDelayShowHideTimer);
   if (mseconds <= 0) {
-    const bool current_visible = (IsWindowVisible() != FALSE);
     SetWindowPos(HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     SendMessageW(WM_NCACTIVATE, FALSE);
-    if (!current_visible) {
-      SendUsageStatsEvent(send_command_interface_,
-                          SessionCommand::INFOLIST_WINDOW_SHOW);
-    }
   } else {
     SetTimer(kIdDelayShowHideTimer, mseconds, nullptr);
   }
@@ -347,19 +329,15 @@ void InfolistWindow::DelayHide(UINT mseconds) {
   visible_ = false;
   KillTimer(kIdDelayShowHideTimer);
   if (mseconds <= 0) {
-    const bool current_visible = (IsWindowVisible() != FALSE);
     ShowWindow(SW_HIDE);
-    if (current_visible) {
-      SendUsageStatsEvent(send_command_interface_,
-                          SessionCommand::INFOLIST_WINDOW_HIDE);
-    }
   } else {
     SetTimer(kIdDelayShowHideTimer, mseconds, nullptr);
   }
 }
 
-void InfolistWindow::UpdateLayout(const commands::Candidates &candidates) {
-  *candidates_ = candidates;
+void InfolistWindow::UpdateLayout(
+    const commands::CandidateWindow &candidate_window) {
+  *candidate_window_ = candidate_window;
 
   // If we detect any change of font parameters, update text renderer
   if (metrics_changed_) {

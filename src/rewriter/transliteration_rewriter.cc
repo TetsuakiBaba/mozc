@@ -58,33 +58,17 @@ namespace {
 
 bool IsComposerApplicable(const ConversionRequest &request,
                           const Segments *segments) {
-  if (!request.has_composer()) {
-    return false;
-  }
-
-  std::string conversion_query;
-  if (request.request_type() == ConversionRequest::PREDICTION ||
-      request.request_type() == ConversionRequest::SUGGESTION) {
-    conversion_query = request.composer().GetQueryForPrediction();
-  } else {
-    conversion_query = request.composer().GetQueryForConversion();
-    if (request.request_type() == ConversionRequest::PARTIAL_PREDICTION ||
-        request.request_type() == ConversionRequest::PARTIAL_SUGGESTION) {
-      Util::Utf8SubString(conversion_query, 0, request.composer().GetCursor(),
-                          &conversion_query);
-    }
-  }
-
   std::string segments_key;
   for (const Segment &segment : segments->conversion_segments()) {
     segments_key.append(segment.key());
   }
-  if (conversion_query != segments_key) {
-    DLOG(WARNING) << "composer seems invalid: composer_key " << conversion_query
-                  << " segments_key " << segments_key;
-    return false;
+  if (request.key() == segments_key) {
+    return true;
   }
-  return true;
+
+  DLOG(WARNING) << "composer seems invalid: composer_key " << request.key()
+                << " segments_key " << segments_key;
+  return false;
 }
 
 void NormalizeT13ns(std::vector<std::string> *t13ns) {
@@ -265,18 +249,17 @@ bool TransliterationRewriter::FillT13nsFromComposer(
   bool modified = false;
   size_t composition_pos = 0;
   for (Segment &segment : segments->conversion_segments()) {
-    const std::string &key = segment.key();
-    if (key.empty()) {
+    const size_t composition_len = segment.key_len();
+    if (composition_len == 0) {
       continue;
     }
-    const size_t composition_len = Util::CharsLen(key);
     std::vector<std::string> t13ns;
     request.composer().GetSubTransliterations(composition_pos, composition_len,
                                               &t13ns);
     composition_pos += composition_len;
 
     ModifyT13ns(request, segment, &t13ns);
-    modified |= SetTransliterations(t13ns, key, &segment);
+    modified |= SetTransliterations(t13ns, segment.key(), &segment);
   }
   return modified;
 }
@@ -357,19 +340,13 @@ bool TransliterationRewriter::AddRawNumberT13nCandidates(
     // Rewriting multiple segments will not make users happier.
     return false;
   }
-  // This process is done on composer's data.
-  // If the request doesn't have a composer, this method can do nothing.
-  if (!request.has_composer()) {
-    return false;
-  }
-  const composer::Composer &composer = request.composer();
+  const composer::ComposerData &composer = request.composer();
   Segment *segment = segments->mutable_conversion_segment(0);
   // Get the half_ascii T13n text (nearly equal Raw input).
   // Note that only one segment is in the Segments, but sometimes like
   // on partial conversion, segment.key() is different from the size of
   // the whole composition.
-  const std::string raw =
-      composer.GetRawSubString(0, Util::CharsLen(segment->key()));
+  const std::string raw = composer.GetRawSubString(0, segment->key_len());
   if (raw.empty()) {
     return false;
   }

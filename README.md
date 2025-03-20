@@ -2,7 +2,7 @@
 forked version.
 ===================================
 
-Copyright 2010-2024 Google LLC
+Copyright 2010-2025 Google LLC
 
 Mozc is a Japanese Input Method Editor (IME) designed for multi-platform such as
 Android OS, Apple macOS, Chromium OS, GNU/Linux and Microsoft Windows.  This
@@ -35,9 +35,10 @@ Detailed differences between Google Japanese Input and Mozc are described in [Ab
 Build Instructions
 ------------------
 
-* [How to build Mozc in Docker](docs/build_mozc_in_docker.md): Android library and Linux desktop builds.
-* [How to build Mozc in macOS](docs/build_mozc_in_osx.md): macOS build.
-* [How to build Mozc in Windows](docs/build_mozc_in_windows.md): Windows build.
+* [How to build Mozc for Android](docs/build_mozc_for_android.md): for Android library (`libmozc.so`)
+* [How to build Mozc for Linux](docs/build_mozc_for_linux.md): for Linux desktop
+* [How to build Mozc for macOS](docs/build_mozc_in_osx.md): for macOS build
+* [How to build Mozc for Windows](docs/build_mozc_in_windows.md): for Windows
 
 Release Plan
 ------------

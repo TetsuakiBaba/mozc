@@ -45,7 +45,6 @@
 #include "converter/segments.h"
 #include "converter/segments_matchers.h"
 #include "data_manager/testing/mock_data_manager.h"
-#include "dictionary/user_dictionary_stub.h"
 #include "engine/modules.h"
 #include "request/conversion_request.h"
 #include "testing/gmock.h"
@@ -54,32 +53,33 @@
 namespace mozc {
 namespace {
 
-using dictionary::UserDictionaryStub;
-
 class MockDataAndImmutableConverter {
  public:
   // Initializes data and immutable converter with given dictionaries.
   MockDataAndImmutableConverter() {
-    modules_.PresetUserDictionary(std::make_unique<UserDictionaryStub>());
-    absl::Status status =
-        modules_.Init(std::make_unique<testing::MockDataManager>());
-    CHECK(status.ok());
-    immutable_converter_ = std::make_unique<ImmutableConverter>(modules_);
+    modules_ =
+        engine::Modules::Create(std::make_unique<testing::MockDataManager>())
+            .value();
+    immutable_converter_ = std::make_unique<ImmutableConverter>(*modules_);
   }
 
   ImmutableConverter *GetConverter() { return immutable_converter_.get(); }
 
-  std::unique_ptr<NBestGenerator> CreateNBestGenerator(const Lattice *lattice) {
+  std::unique_ptr<NBestGenerator> CreateNBestGenerator(const Lattice &lattice) {
     return std::make_unique<NBestGenerator>(
-        modules_.GetSuppressionDictionary(), modules_.GetSegmenter(),
-        modules_.GetConnector(), modules_.GetPosMatcher(), lattice,
-        modules_.GetSuggestionFilter());
+        modules_->GetUserDictionary(), modules_->GetSegmenter(),
+        modules_->GetConnector(), modules_->GetPosMatcher(), lattice,
+        modules_->GetSuggestionFilter());
   }
 
  private:
-  engine::Modules modules_;
+  std::unique_ptr<const engine::Modules> modules_;
   std::unique_ptr<ImmutableConverter> immutable_converter_;
 };
+
+ConversionRequest ConvReq(ConversionRequest::RequestType request_type) {
+  return ConversionRequestBuilder().SetRequestType(request_type).Build();
+}
 
 }  // namespace
 
@@ -120,8 +120,7 @@ TEST_F(NBestGeneratorTest, MultiSegmentConnectionTest) {
 
   Lattice lattice;
   lattice.SetKey("しんこうする");
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::CONVERSION);
+  const ConversionRequest request = ConvReq(ConversionRequest::CONVERSION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -129,7 +128,7 @@ TEST_F(NBestGeneratorTest, MultiSegmentConnectionTest) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = false;  // For 'normal' conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -177,8 +176,7 @@ TEST_F(NBestGeneratorTest, SingleSegmentConnectionTest) {
 
   Lattice lattice;
   lattice.SetKey(kText);
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::CONVERSION);
+  const ConversionRequest request = ConvReq(ConversionRequest::CONVERSION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -186,7 +184,7 @@ TEST_F(NBestGeneratorTest, SingleSegmentConnectionTest) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = true;  // For real time conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -229,8 +227,7 @@ TEST_F(NBestGeneratorTest, InnerSegmentBoundary) {
 
   Lattice lattice;
   lattice.SetKey(kInput);
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::PREDICTION);
+  const ConversionRequest request = ConvReq(ConversionRequest::PREDICTION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -238,7 +235,7 @@ TEST_F(NBestGeneratorTest, InnerSegmentBoundary) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = true;  // For real time conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -305,8 +302,7 @@ TEST_F(NBestGeneratorTest, NoPartialCandidateBetweenAlphabets) {
 
   Lattice lattice;
   lattice.SetKey(kInput);
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::PREDICTION);
+  const ConversionRequest request = ConvReq(ConversionRequest::PREDICTION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -314,7 +310,7 @@ TEST_F(NBestGeneratorTest, NoPartialCandidateBetweenAlphabets) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = true;  // For real time conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -350,8 +346,7 @@ TEST_F(NBestGeneratorTest, NoAlphabetsConnection2Nodes) {
 
   Lattice lattice;
   lattice.SetKey(kText);
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::CONVERSION);
+  const ConversionRequest request = ConvReq(ConversionRequest::CONVERSION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -359,7 +354,7 @@ TEST_F(NBestGeneratorTest, NoAlphabetsConnection2Nodes) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = true;  // For real time conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -392,8 +387,7 @@ TEST_F(NBestGeneratorTest, NoAlphabetsConnection3Nodes) {
 
   Lattice lattice;
   lattice.SetKey(kText);
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::CONVERSION);
+  const ConversionRequest request = ConvReq(ConversionRequest::CONVERSION);
   converter->MakeLattice(request, &segments, &lattice);
 
   std::vector<uint16_t> group;
@@ -401,7 +395,7 @@ TEST_F(NBestGeneratorTest, NoAlphabetsConnection3Nodes) {
   converter->Viterbi(segments, &lattice);
 
   std::unique_ptr<NBestGenerator> nbest_generator =
-      data_and_converter->CreateNBestGenerator(&lattice);
+      data_and_converter->CreateNBestGenerator(lattice);
 
   constexpr bool kSingleSegment = true;  // For real time conversion
   const Node *begin_node = lattice.bos_nodes();
@@ -413,7 +407,7 @@ TEST_F(NBestGeneratorTest, NoAlphabetsConnection3Nodes) {
   Segment result_segment;
   nbest_generator->SetCandidates(request, "", 10, &result_segment);
   // Tne top candidate consists of two elements, "eupho" and "東京". Such
-  // connection from English word to a noraml word is possible.
+  // connection from English word to a normal word is possible.
   ASSERT_GE(result_segment.candidates_size(), 1);
   EXPECT_EQ(result_segment.candidate(0).value, "eupho東京");
   EXPECT_EQ(result_segment.candidate(0).inner_segment_boundary.size(), 2);

@@ -49,20 +49,14 @@
 #include "composer/composer.h"
 #include "composer/key_event_util.h"
 #include "composer/table.h"
-#include "converter/segments.h"
+#include "engine/engine_converter_interface.h"
 #include "engine/engine_interface.h"
-#include "engine/user_data_manager_interface.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "session/internal/ime_context.h"
-#include "session/internal/key_event_transformer.h"
-#include "session/internal/keymap.h"
-#include "session/internal/session_output.h"
-#include "session/session_converter.h"
-#include "session/session_converter_interface.h"
-#include "session/session_usage_stats_util.h"
+#include "session/ime_context.h"
+#include "session/key_event_transformer.h"
+#include "session/keymap.h"
 #include "transliteration/transliteration.h"
-#include "usage_stats/usage_stats.h"
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>  // for TARGET_OS_IPHONE
@@ -72,7 +66,8 @@ namespace mozc {
 namespace session {
 namespace {
 
-using ::mozc::usage_stats::UsageStats;
+using ::mozc::engine::ConversionPreferences;
+using ::mozc::engine::EngineConverterInterface;
 
 // Maximum size of multiple undo stack.
 const size_t kMultipleUndoMaxSize = 10;
@@ -168,6 +163,18 @@ void SetSessionState(const ImeContext::State state, ImeContext *context) {
   }
 }
 
+void SetStateToPredompositionAndCancel(ImeContext *context) {
+  SetSessionState(ImeContext::PRECOMPOSITION, context);
+  // mutable_converter's internal state should be updated by calling Cancel().
+  // Internal state contains:
+  // - candidate list
+  // - result text to commit
+  if (!context->mutable_converter()->CheckState(
+          EngineConverterInterface::COMPOSITION)) {
+    context->mutable_converter()->Cancel();
+  }
+}
+
 commands::CompositionMode ToCompositionMode(
     mozc::transliteration::TransliterationType type) {
   commands::CompositionMode mode = commands::HIRAGANA;
@@ -212,20 +219,14 @@ ImeContext::State GetEffectiveStateForTestSendKey(const commands::KeyEvent &key,
 
 }  // namespace
 
-// TODO(komatsu): Remove these argument by using/making singletons.
-Session::Session(EngineInterface *engine)
-    : engine_(engine), context_(new ImeContext) {
-  InitContext(context_.get());
-}
+Session::Session(const EngineInterface &engine)
+    : context_(CreateContext(engine)) {}
 
-void Session::InitContext(ImeContext *context) const {
+std::unique_ptr<ImeContext> Session::CreateContext(
+    const EngineInterface &engine) const {
+  auto context = std::make_unique<ImeContext>(engine.CreateEngineConverter());
   context->set_create_time(Clock::GetAbslTime());
-  context->set_last_command_time(absl::InfinitePast());
-  context->set_composer(std::make_unique<composer::Composer>(
-      &composer::Table::GetDefaultTable(), &context->GetRequest(),
-      &context->GetConfig()));
-  context->set_converter(std::make_unique<SessionConverter>(
-      engine_->GetConverter(), &context->GetRequest(), &context->GetConfig()));
+
 #ifdef _WIN32
   // On Windows session is started with direct mode.
   // FIXME(toshiyuki): Ditto for Mac after verifying on Mac.
@@ -233,10 +234,6 @@ void Session::InitContext(ImeContext *context) const {
 #else   // _WIN32
   context->set_state(ImeContext::PRECOMPOSITION);
 #endif  // _WIN32
-  context->mutable_client_context()->Clear();
-
-  context->SetConfig(&context->GetConfig());
-  context->SetKeyMapManager(&context->GetKeyMapManager());
 
   // TODO(team): Remove #if based behavior change for cascading window.
   // Tests for session layer (session_handler_scenario_test, etc) can be
@@ -245,14 +242,13 @@ void Session::InitContext(ImeContext *context) const {
     defined(__wasm__)
   context->mutable_converter()->set_use_cascading_window(false);
 #endif  // TARGET_OS_IPHONE || __linux__ || __wasm__
+
+  return context;
 }
 
 void Session::PushUndoContext() {
   // Copy the current context and push it to the undo stack.
-  auto prev_context = std::make_unique<ImeContext>();
-  InitContext(prev_context.get());
-  ImeContext::CopyContext(*context_, prev_context.get());
-  undo_contexts_.push_back(std::move(prev_context));
+  undo_contexts_.emplace_back(std::make_unique<ImeContext>(*context_));
   // If the stack size exceeds the limitation, purge the oldest entries.
   while (undo_contexts_.size() > kMultipleUndoMaxSize) {
     undo_contexts_.pop_front();
@@ -291,8 +287,6 @@ bool Session::SendCommand(commands::Command *command) {
     return false;
   }
   TransformInput(command->mutable_input());
-
-  SessionUsageStatsUtil::AddSendCommandInputStats(command->input());
 
   const commands::SessionCommand &session_command = command->input().command();
   bool result = false;
@@ -365,12 +359,6 @@ bool Session::SendCommand(commands::Command *command) {
     case commands::SessionCommand::SWITCH_INPUT_FIELD_TYPE:
       result = SwitchInputFieldType(command);
       break;
-    case commands::SessionCommand::USAGE_STATS_EVENT:
-      // Set consumed to false, because the client don't need to do anything
-      // when it receive the output from the server.
-      command->mutable_output()->set_consumed(false);
-      result = true;
-      break;
     case commands::SessionCommand::UNDO_OR_REWIND:
       result = UndoOrRewind(command);
       break;
@@ -441,7 +429,7 @@ bool Session::TestSendKey(commands::Command *command) {
   if (state == ImeContext::PRECOMPOSITION) {
     keymap::PrecompositionState::Commands key_command;
     const bool is_suggestion =
-        context_->converter().CheckState(SessionConverterInterface::SUGGESTION);
+        context_->converter().CheckState(EngineConverterInterface::SUGGESTION);
     const bool result =
         is_suggestion ? keymap->GetCommandZeroQuerySuggestion(key, &key_command)
                       : keymap->GetCommandPrecomposition(key, &key_command);
@@ -511,8 +499,6 @@ bool Session::SendKey(commands::Command *command) {
   // state instead of directly using context_->state().
   HandleIndirectImeOnOff(command);
 
-  SessionUsageStatsUtil::AddSendKeyInputStats(command->input());
-
   bool result = false;
   switch (context_->state()) {
     case ImeContext::DIRECT:
@@ -535,8 +521,6 @@ bool Session::SendKey(commands::Command *command) {
       result = false;
       break;
   }
-
-  SessionUsageStatsUtil::AddSendKeyOutputStats(command->output());
 
   MaybeSetUndoStatus(command);
   return result;
@@ -591,10 +575,7 @@ bool Session::SendKeyDirectInputState(commands::Command *command) {
   if (!keymap->GetCommandDirect(command->input().key(), &key_command)) {
     return EchoBackAndClearUndoContext(command);
   }
-  std::string command_name;
-  if (keymap->GetNameFromCommandDirect(key_command, &command_name)) {
-    UsageStats::IncrementCount("Performed_Direct_" + command_name);
-  }
+
   switch (key_command) {
     case keymap::DirectInputState::IME_ON:
       return IMEOn(command);
@@ -620,7 +601,7 @@ bool Session::SendKeyPrecompositionState(commands::Command *command) {
   keymap::PrecompositionState::Commands key_command;
   const keymap::KeyMapManager *keymap = &context_->GetKeyMapManager();
   const bool result =
-      context_->converter().CheckState(SessionConverterInterface::SUGGESTION)
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
           ? keymap->GetCommandZeroQuerySuggestion(command->input().key(),
                                                   &key_command)
           : keymap->GetCommandPrecomposition(command->input().key(),
@@ -628,10 +609,6 @@ bool Session::SendKeyPrecompositionState(commands::Command *command) {
 
   if (!result) {
     return EchoBackAndClearUndoContext(command);
-  }
-  std::string command_name;
-  if (keymap->GetNameFromCommandPrecomposition(key_command, &command_name)) {
-    UsageStats::IncrementCount("Performed_Precomposition_" + command_name);
   }
 
   // Update the client context (if any) for later use. Note that the client
@@ -713,17 +690,14 @@ bool Session::SendKeyCompositionState(commands::Command *command) {
   keymap::CompositionState::Commands key_command;
   const keymap::KeyMapManager *keymap = &context_->GetKeyMapManager();
   const bool result =
-      context_->converter().CheckState(SessionConverterInterface::SUGGESTION)
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
           ? keymap->GetCommandSuggestion(command->input().key(), &key_command)
           : keymap->GetCommandComposition(command->input().key(), &key_command);
 
   if (!result) {
     return DoNothing(command);
   }
-  std::string command_name;
-  if (keymap->GetNameFromCommandComposition(key_command, &command_name)) {
-    UsageStats::IncrementCount("Performed_Composition_" + command_name);
-  }
+
   switch (key_command) {
     case keymap::CompositionState::INSERT_CHARACTER:
       return InsertCharacter(command);
@@ -855,17 +829,14 @@ bool Session::SendKeyConversionState(commands::Command *command) {
   keymap::ConversionState::Commands key_command;
   const keymap::KeyMapManager *keymap = &context_->GetKeyMapManager();
   const bool result =
-      context_->converter().CheckState(SessionConverterInterface::PREDICTION)
+      context_->converter().CheckState(EngineConverterInterface::PREDICTION)
           ? keymap->GetCommandPrediction(command->input().key(), &key_command)
           : keymap->GetCommandConversion(command->input().key(), &key_command);
 
   if (!result) {
     return DoNothing(command);
   }
-  std::string command_name;
-  if (keymap->GetNameFromCommandConversion(key_command, &command_name)) {
-    UsageStats::IncrementCount("Performed_Conversion_" + command_name);
-  }
+
   switch (key_command) {
     case keymap::ConversionState::INSERT_CHARACTER:
       return InsertCharacter(command);
@@ -1157,12 +1128,8 @@ bool Session::Revert(commands::Command *command) {
   command->mutable_output()->set_consumed(true);
   ClearUndoContext();
 
-  if (context_->state() == ImeContext::CONVERSION) {
-    context_->mutable_converter()->Cancel();
-  }
-
-  SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
-  OutputMode(command);
+  SetStateToPredompositionAndCancel(context_.get());
+  Output(command);
   return true;
 }
 
@@ -1177,28 +1144,34 @@ bool Session::ResetContext(commands::Command *command) {
 
   context_->mutable_converter()->Reset();
 
-  SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
-  OutputMode(command);
+  SetStateToPredompositionAndCancel(context_.get());
+  Output(command);
   return true;
 }
 
-void Session::SetTable(const composer::Table *table) {
+void Session::SetTable(std::shared_ptr<const composer::Table> table) {
+  if (!table) {
+    return;
+  }
   ClearUndoContext();
-  context_->mutable_composer()->SetTable(table);
+  context_->mutable_composer()->SetTable(std::move(table));
 }
 
-void Session::SetConfig(const config::Config *config) {
+void Session::SetConfig(std::shared_ptr<const config::Config> config) {
+  DCHECK(config);
   ClearUndoContext();
-  context_->SetConfig(config);
+  context_->SetConfig(std::move(config));
 }
 
-void Session::SetRequest(const commands::Request *request) {
+void Session::SetRequest(std::shared_ptr<const commands::Request> request) {
+  DCHECK(request);
   ClearUndoContext();
-  context_->SetRequest(request);
+  context_->SetRequest(std::move(request));
 }
 
 void Session::SetKeyMapManager(
-    const mozc::keymap::KeyMapManager *key_map_manager) {
+    std::shared_ptr<const mozc::keymap::KeyMapManager> key_map_manager) {
+  DCHECK(key_map_manager);
   context_->SetKeyMapManager(key_map_manager);
 }
 
@@ -1462,13 +1435,12 @@ bool Session::MaybeSelectCandidate(commands::Command *command) {
   return context_->mutable_converter()->CandidateMoveToShortcut(shortcut);
 }
 
-void Session::set_client_capability(const commands::Capability &capability) {
-  *context_->mutable_client_capability() = capability;
+void Session::set_client_capability(commands::Capability capability) {
+  *context_->mutable_client_capability() = std::move(capability);
 }
 
-void Session::set_application_info(
-    const commands::ApplicationInfo &application_info) {
-  *context_->mutable_application_info() = application_info;
+void Session::set_application_info(commands::ApplicationInfo application_info) {
+  *context_->mutable_application_info() = std::move(application_info);
 }
 
 const commands::ApplicationInfo &Session::application_info() const {
@@ -1746,21 +1718,10 @@ bool Session::EditCancel(commands::Command *command) {
 
   command->mutable_output()->set_consumed(true);
 
-  // To work around b/5034698, we need to use OutputMode() unless the
-  // original text is restored to cancel reconversion.
-  const bool text_restored = TryCancelConvertReverse(command);
-  SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
-  if (text_restored) {
-    Output(command);
-  } else {
-    // It is nice to use Output() instead of OutputMode().  However, if
-    // Output() is used, unnecessary candidate words are shown because
-    // the previous candidate state is not cleared here.  To fix it, we
-    // should carefully modify SessionConverter. See b/5034698.
-    //
-    // TODO(komatsu): Use Output() instead of OutputMode.
-    OutputMode(command);
-  }
+  TryCancelConvertReverse(command);
+
+  SetStateToPredompositionAndCancel(context_.get());
+  Output(command);
   return true;
 }
 
@@ -1935,7 +1896,7 @@ void Session::CommitCompositionDirectly(commands::Command *command) {
 void Session::CommitSourceTextDirectly(commands::Command *command) {
   // We cannot use a reference since composer will be cleared on
   // CommitStringDirectly.
-  const std::string copied_source_text = context_->composer().source_text();
+  absl::string_view copied_source_text = context_->composer().source_text();
   CommitStringDirectly(copied_source_text, copied_source_text, command);
 }
 
@@ -1944,8 +1905,8 @@ void Session::CommitRawTextDirectly(commands::Command *command) {
   CommitStringDirectly(raw_text, raw_text, command);
 }
 
-void Session::CommitStringDirectly(const std::string &key,
-                                   const std::string &preedit,
+void Session::CommitStringDirectly(absl::string_view key,
+                                   absl::string_view preedit,
                                    commands::Command *command) {
   if (key.empty() || preedit.empty()) {
     return;
@@ -1999,14 +1960,14 @@ bool Session::Suggest(const commands::Input &input) {
   // |request_suggestion| is not supposed to always ensure suppressing
   // suggestion since this field is used for performance improvement
   // by skipping interim suggestions.  However, the implementation of
-  // SessionConverter::SuggestWithPreferences does not perform suggest
+  // EngineConverter::SuggestWithPreferences does not perform suggest
   // whenever this flag is on.  So the caller should consider whether
   // this flag should be set or not.  Because the original logic was
   // implemented in Session::InserCharacter, we check the input.type()
   // is SEND_KEY assuming SEND_KEY results InsertCharacter (in most
   // cases).
   //
-  // TODO(komatsu): Move the logic into SessionConverter.
+  // TODO(komatsu): Move the logic into EngineConverter.
   if (input.has_request_suggestion() &&
       input.type() == commands::Input::SEND_KEY) {
     ConversionPreferences conversion_preferences =
@@ -2293,27 +2254,18 @@ bool Session::UndoOrRewind(commands::Command *command) {
   }
 
   // Rewind if the state is in composition.
-  if (context_->state() & ImeContext::COMPOSITION) {
-    command->mutable_output()->set_consumed(true);
-    return SendComposerCommand(composer::Composer::REWIND, command);
-  }
-
-  // Mozc decoder doesn't do anything for UNDO_OR_REWIND.
-  // Echo back the event to the client to give it a chance to delegate
-  // undo operation to the app.
-  return EchoBack(command);
-}
-
-bool Session::SendComposerCommand(
-    const composer::Composer::InternalCommand composer_command,
-    commands::Command *command) {
   if (!(context_->state() & ImeContext::COMPOSITION)) {
-    DLOG(WARNING) << "State : " << context_->state();
-    return false;
+    // Mozc decoder doesn't do anything for UNDO_OR_REWIND.
+    // Echo back the event to the client to give it a chance to delegate
+    // undo operation to the app.
+    return EchoBack(command);
   }
 
-  context_->mutable_composer()->InsertCommandCharacter(composer_command);
+  command->mutable_output()->set_consumed(true);
+  context_->mutable_composer()->InsertCommandCharacter(
+      composer::Composer::REWIND);
   ClearUndoContext();
+
   // InsertCommandCharacter method updates the preedit text
   // so we need to update suggest candidates.
   if (Suggest(command->input())) {
@@ -2321,6 +2273,22 @@ bool Session::SendComposerCommand(
     return true;
   }
   OutputComposition(command);
+  return true;
+}
+
+bool Session::StopKeyToggling(commands::Command *command) {
+  if (!(context_->state() & ImeContext::COMPOSITION)) {
+    return DoNothing(command);
+  }
+
+  command->mutable_output()->set_consumed(true);
+  context_->mutable_composer()->InsertCommandCharacter(
+      composer::Composer::STOP_KEY_TOGGLING);
+  ClearUndoContext();
+
+  // Since the output should not be changed on STOP_KEY_TOGGLING,
+  // The last output is used instead of calling the converter operations.
+  Output(command);
   return true;
 }
 
@@ -2341,14 +2309,6 @@ bool Session::DeleteCandidateFromHistory(commands::Command *command) {
     return DoNothing(command);
   }
   return ConvertCancel(command);
-}
-
-bool Session::StopKeyToggling(commands::Command *command) {
-  if (context_->state() & ImeContext::COMPOSITION) {
-    command->mutable_output()->set_consumed(true);
-    return SendComposerCommand(composer::Composer::STOP_KEY_TOGGLING, command);
-  }
-  return DoNothing(command);
 }
 
 bool Session::Convert(commands::Command *command) {
@@ -2568,11 +2528,10 @@ bool Session::Delete(commands::Command *command) {
   context_->mutable_composer()->Delete();
   ClearUndoContext();
   if (context_->mutable_composer()->Empty()) {
-    SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
-    OutputMode(command);
+    SetStateToPredompositionAndCancel(context_.get());
+    Output(command);
   } else if (Suggest(command->input())) {
     Output(command);
-    return true;
   } else {
     OutputComposition(command);
   }
@@ -2584,11 +2543,10 @@ bool Session::Backspace(commands::Command *command) {
   context_->mutable_composer()->Backspace();
   ClearUndoContext();
   if (context_->mutable_composer()->Empty()) {
-    SetSessionState(ImeContext::PRECOMPOSITION, context_.get());
-    OutputMode(command);
+    SetStateToPredompositionAndCancel(context_.get());
+    Output(command);
   } else if (Suggest(command->input())) {
     Output(command);
-    return true;
   } else {
     OutputComposition(command);
   }
@@ -2722,19 +2680,11 @@ bool Session::PredictAndConvert(commands::Command *command) {
 }
 
 void Session::OutputFromState(commands::Command *command) {
-  if (context_->state() == ImeContext::PRECOMPOSITION) {
+  if (context_->state() == ImeContext::DIRECT) {
     OutputMode(command);
     return;
   }
-  if (context_->state() == ImeContext::COMPOSITION) {
-    OutputComposition(command);
-    return;
-  }
-  if (context_->state() == ImeContext::CONVERSION) {
-    Output(command);
-    return;
-  }
-  OutputMode(command);
+  Output(command);
 }
 
 void Session::Output(commands::Command *command) {
@@ -2764,8 +2714,8 @@ void Session::OutputMode(commands::Command *command) const {
 
 void Session::OutputComposition(commands::Command *command) const {
   OutputMode(command);
-  commands::Preedit *preedit = command->mutable_output()->mutable_preedit();
-  SessionOutput::FillPreedit(context_->composer(), preedit);
+  context_->converter().FillPreedit(
+      context_->composer(), command->mutable_output()->mutable_preedit());
 }
 
 void Session::OutputKey(commands::Command *command) const {

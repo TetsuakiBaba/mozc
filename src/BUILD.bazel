@@ -97,6 +97,16 @@ selects.config_setting_group(
     visibility = ["//:__subpackages__"],
 )
 
+# Generic Windows platform with clang-cl that automatically matches host CPU.
+platform(
+    name = "host-windows-clang-cl",
+    constraint_values = [
+        "@platforms//os:windows",
+        "@bazel_tools//tools/cpp:clang-cl",
+    ],
+    parents = ["@local_config_platform//:host"],
+)
+
 # Special target so as to define special macros for each platforms.
 # Don't depend on this directly. Use mozc_cc_(library|binary|test) rule instead.
 cc_library(
@@ -180,6 +190,7 @@ bzl_library(
         "//bazel:run_build_tool_bzl",
         "//bazel:stubs.bzl",
         "//devtools/build_cleaner/skylark:build_defs_lib",
+        "@bazel_skylib//rules:select_file",
         "@build_bazel_rules_apple//apple:macos",
     ],
 )
@@ -198,6 +209,7 @@ filegroup(
         default = [],
         linux = ["//unix:package"],
         macos = ["//mac:package"],
+        windows = ["//win32/installer"],
     ),
 )
 

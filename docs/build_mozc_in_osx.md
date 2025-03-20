@@ -22,7 +22,7 @@ python3 build_tools/update_deps.py
 # CMake is also required to build Qt.
 python3 build_tools/build_qt.py --release --confirm_license
 
-MOZC_QT_PATH=${PWD}/third_party/qt bazel build package --config oss_macos --config release_build
+MOZC_QT_PATH=${PWD}/third_party/qt bazelisk build package --config oss_macos --config release_build
 open bazel-bin/mac/Mozc.pkg
 ```
 
@@ -49,7 +49,9 @@ Building on Mac requires the following software.
 * [Xcode](https://apps.apple.com/us/app/xcode/id497799835)
   * Xcode 13 (macOS 13 SDK) or later
   * ⚠️Xcode Command Line Tools aren't sufficient.
-* [Bazel](https://docs.bazel.build/versions/master/install-os-x.html) for Bazel build
+* [Bazelisk](https://github.com/bazelbuild/bazelisk)
+  * Bazelisk is a wrapper of [Bazel](https://bazel.build/) to use the specific version of Bazel.
+  * [src/.bazeliskrc](../src/.bazeliskrc) controls which version of Bazel is used.
 * Python 3.9 or later with the following pip module.
   * `requests`
 * CMake 3.18.4 or later (to build Qt6)
@@ -87,7 +89,7 @@ python build_tools/update_deps.py
 In this step, additional build dependencies will be downloaded.
 
   * [Ninja 1.11.0](https://github.com/ninja-build/ninja/releases/download/v1.11.0/ninja-mac.zip)
-  * [Qt 6.7.2](https://download.qt.io/archive/qt/6.7/6.7.2/submodules/qtbase-everywhere-src-6.7.2.tar.xz)
+  * [Qt 6.8.0](https://download.qt.io/archive/qt/6.8/6.8.0/submodules/qtbase-everywhere-src-6.8.0.tar.xz)
   * [git submodules](../.gitmodules)
 
 You can specify `--noqt` option if you would like to use your own Qt binaries.
@@ -133,7 +135,7 @@ brew install cmake
 ### Build installer
 
 ```
-MOZC_QT_PATH=${PWD}/third_party/qt bazel build package --config oss_macos --config release_build
+MOZC_QT_PATH=${PWD}/third_party/qt bazelisk build package --config oss_macos --config release_build
 open bazel-bin/mac/Mozc.pkg
 ```
 
@@ -142,21 +144,21 @@ open bazel-bin/mac/Mozc.pkg
 To build an Intel64 macOS binary regardless of the host CPU architecture.
 ```
 python3 build_tools/build_qt.py --release --debug --confirm_license --macos_cpus=x64_64
-MOZC_QT_PATH=${PWD}/third_party/qt bazel build package --config oss_macos --config release_build --macos_cpus=x64_64
+MOZC_QT_PATH=${PWD}/third_party/qt bazelisk build package --config oss_macos --config release_build --macos_cpus=x64_64
 open bazel-bin/mac/Mozc.pkg
 ```
 
 To build a Universal macOS Binary both x86_64 and arm64.
 ```
 python3 build_tools/build_qt.py --release --debug --confirm_license --macos_cpus=x86_64,arm64
-MOZC_QT_PATH=${PWD}/third_party/qt bazel build package --config oss_macos --config release_build --macos_cpus=x86_64,arm64
+MOZC_QT_PATH=${PWD}/third_party/qt bazelisk build package --config oss_macos --config release_build --macos_cpus=x86_64,arm64
 open bazel-bin/mac/Mozc.pkg
 ```
 
 ### Unit tests
 
 ```
-MOZC_QT_PATH=${PWD}/third_party/qt bazel test ... --config oss_macos --build_tests_only -c dbg
+MOZC_QT_PATH=${PWD}/third_party/qt bazelisk test ... --config oss_macos --build_tests_only -c dbg
 ```
 
 See [build Mozc in Docker](build_mozc_in_docker.md#unittests) for details.
@@ -196,7 +198,7 @@ Files in the GitHub Actions page remain available up to 90 days.
 You can also find Mozc Installers for macOS in google/mozc repository. Please keep in mind that Mozc is not an officially supported Google product, even if downloaded from https://github.com/google/mozc/.
 
 1. Sign in GitHub.
-2. Check [recent successfull macOS runs](https://github.com/google/mozc/actions/workflows/macos.yaml?query=is%3Asuccess) in google/mozc repository.
+2. Check [recent successful macOS runs](https://github.com/google/mozc/actions/workflows/macos.yaml?query=is%3Asuccess) in google/mozc repository.
 3. Find action in last 90 days and click it.
 4. Download `Mozc.pkg` from the action result page.
 

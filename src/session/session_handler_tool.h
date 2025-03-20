@@ -40,12 +40,10 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "engine/engine_interface.h"
-#include "engine/user_data_manager_interface.h"
-#include "protocol/candidates.pb.h"
+#include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "session/session_handler_interface.h"
-#include "session/session_observer_interface.h"
+#include "session/session_handler.h"
 
 namespace mozc {
 namespace session {
@@ -101,9 +99,8 @@ class SessionHandlerTool {
                            bool allow_callback);
 
   uint64_t id_;  // Session ID
-  std::unique_ptr<SessionObserverInterface> usage_observer_;
-  UserDataManagerInterface *data_manager_;
-  std::unique_ptr<SessionHandlerInterface> handler_;
+  EngineInterface *engine_ = nullptr;
+  std::unique_ptr<SessionHandler> handler_;
   std::string callback_text_;
 };
 
@@ -133,7 +130,7 @@ class SessionHandlerInterpreter final {
 
  private:
   std::unique_ptr<SessionHandlerTool> client_;
-  std::unique_ptr<config::Config> config_;
+  config::Config config_;
   std::unique_ptr<commands::Output> last_output_;
   std::unique_ptr<commands::Request> request_;
 };

@@ -359,7 +359,6 @@ std::wstring Sid::GetName() const {
 }
 
 std::wstring Sid::GetAccountName() const {
-  wchar_t *ptr = nullptr;
   DWORD name_size = 0;
   DWORD domain_name_size = 0;
   SID_NAME_USE name_use;
@@ -1015,6 +1014,23 @@ bool SetTokenIntegrityLevel(HANDLE token,
   return (result != FALSE);
 }
 
+constexpr ACCESS_MASK GetAccessMask(
+    WinSandbox::AppContainerVisibilityType type) {
+  const ACCESS_MASK kBaseType =
+      FILE_READ_DATA | FILE_READ_EA | READ_CONTROL | SYNCHRONIZE;
+
+  switch (type) {
+    case WinSandbox::AppContainerVisibilityType::kProgramFiles:
+      // As of Windows 10 Anniversary Update, following access masks (==0x1200a9)
+      // are specified to files under Program Files by default.
+      return FILE_EXECUTE | kBaseType;
+    case WinSandbox::AppContainerVisibilityType::kConfigFile:
+      return FILE_GENERIC_READ | FILE_READ_ATTRIBUTES | kBaseType;
+    default:
+      return kBaseType;
+  }
+}
+
 }  // namespace
 
 std::vector<Sid> WinSandbox::GetSidsToDisable(HANDLE effective_token,
@@ -1232,7 +1248,7 @@ wil::unique_process_handle WinSandbox::GetRestrictedTokenHandleForImpersonation(
 }
 
 bool WinSandbox::EnsureAllApplicationPackagesPermisssion(
-    zwstring_view file_name) {
+    zwstring_view file_name, AppContainerVisibilityType type) {
   // Get "All Application Packages" group SID.
   const ATL::CSid all_application_packages(
       Sid(WinBuiltinAnyPackageSid).GetPSID());
@@ -1243,10 +1259,7 @@ bool WinSandbox::EnsureAllApplicationPackagesPermisssion(
     return false;
   }
 
-  // As of Windows 10 Anniversary Update, following access masks (==0x1200a9)
-  // are specified to files under Program Files by default.
-  const ACCESS_MASK kDesiredMask =
-      FILE_READ_DATA | FILE_READ_EA | FILE_EXECUTE | READ_CONTROL | SYNCHRONIZE;
+  const ACCESS_MASK desired_mask = GetAccessMask(type);
 
   // Check if the desired ACE is already specified or not.
   for (UINT i = 0; i < dacl.GetAceCount(); ++i) {
@@ -1256,14 +1269,14 @@ bool WinSandbox::EnsureAllApplicationPackagesPermisssion(
     dacl.GetAclEntry(i, &ace_sid, &access_mask, &ace_type);
     if (ace_sid == all_application_packages &&
         ace_type == ACCESS_ALLOWED_ACE_TYPE &&
-        (access_mask & kDesiredMask) == kDesiredMask) {
+        (access_mask & desired_mask) == desired_mask) {
       // This is the desired ACE.  There is nothing to do.
       return true;
     }
   }
 
   // We are here because there is no desired ACE.  Hence we do add it.
-  if (!dacl.AddAllowedAce(all_application_packages, kDesiredMask,
+  if (!dacl.AddAllowedAce(all_application_packages, desired_mask,
                           ACCESS_ALLOWED_ACE_TYPE)) {
     return false;
   }

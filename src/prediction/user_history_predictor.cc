@@ -38,7 +38,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,13 +61,12 @@
 #include "base/container/trie.h"
 #include "base/hash.h"
 #include "base/japanese_util.h"
-#include "base/thread.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
 #include "converter/segments.h"
+#include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
-#include "dictionary/suppression_dictionary.h"
 #include "engine/modules.h"
 #include "prediction/user_history_predictor.pb.h"
 #include "protocol/commands.pb.h"
@@ -77,13 +75,11 @@
 #include "rewriter/variants_rewriter.h"
 #include "storage/encrypted_string_storage.h"
 #include "storage/lru_cache.h"
-#include "usage_stats/usage_stats.h"
 
 namespace mozc::prediction {
 namespace {
 
 using ::mozc::composer::TypeCorrectedQuery;
-using ::mozc::usage_stats::UsageStats;
 
 // Finds suggestion candidates from the most recent 3000 history in LRU.
 // We don't check all history, since suggestion is called every key event
@@ -345,7 +341,7 @@ UserHistoryPredictor::UserHistoryPredictor(const engine::Modules &modules,
                                            bool enable_content_word_learning)
     : dictionary_(modules.GetDictionary()),
       pos_matcher_(modules.GetPosMatcher()),
-      suppression_dictionary_(modules.GetSuppressionDictionary()),
+      user_dictionary_(modules.GetUserDictionary()),
       predictor_name_("UserHistoryPredictor"),
       content_word_learning_enabled_(enable_content_word_learning),
       updated_(false),
@@ -480,10 +476,6 @@ bool UserHistoryPredictor::Save() {
   for (const DicElement *elm = tail; elm != nullptr; elm = elm->prev) {
     *history.GetProto().add_entries() = elm->value;
   }
-
-  // Updates usage stats here.
-  UsageStats::SetInteger("UserHistoryPredictorEntrySize",
-                         static_cast<int>(history.GetProto().entries_size()));
 
   if (!history.Save()) {
     LOG(ERROR) << "UserHistoryStorage::Save() failed";
@@ -724,14 +716,14 @@ std::vector<TypeCorrectedQuery> UserHistoryPredictor::GetTypingCorrectedQueries(
   const int size = request.request()
                        .decoder_experiment_params()
                        .typing_correction_apply_user_history_size();
-  if (size == 0) return {};
+  if (size == 0 || !request.config().use_typing_correction()) return {};
 
   const engine::SupplementalModelInterface *supplemental_model =
       modules_.GetSupplementalModel();
   if (supplemental_model == nullptr) return {};
 
   const std::optional<std::vector<TypeCorrectedQuery>> corrected =
-      supplemental_model->CorrectComposition(request, segments.history_key());
+      supplemental_model->CorrectComposition(request, segments);
   if (!corrected) return {};
 
   std::vector<TypeCorrectedQuery> result = std::move(corrected.value());
@@ -1176,8 +1168,10 @@ bool UserHistoryPredictor::LookupEntry(RequestType request_type,
 }
 
 bool UserHistoryPredictor::Predict(Segments *segments) const {
-  ConversionRequest default_request;
-  default_request.set_request_type(ConversionRequest::PREDICTION);
+  const ConversionRequest default_request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::PREDICTION)
+          .Build();
   return PredictForRequest(default_request, segments);
 }
 
@@ -1190,10 +1184,9 @@ bool UserHistoryPredictor::PredictForRequest(const ConversionRequest &request,
     return false;
   }
 
-  const size_t input_key_len =
-      Util::CharsLen(segments->conversion_segment(0).key());
+  const bool is_empty_input = segments->conversion_segment(0).key().empty();
   const Entry *prev_entry = LookupPrevEntry(*segments);
-  if (input_key_len == 0 && prev_entry == nullptr) {
+  if (is_empty_input && prev_entry == nullptr) {
     MOZC_VLOG(1) << "If input_key_len is 0, prev_entry must be set";
     return false;
   }
@@ -1201,7 +1194,7 @@ bool UserHistoryPredictor::PredictForRequest(const ConversionRequest &request,
   const auto &params = request.request().decoder_experiment_params();
 
   const bool is_zero_query =
-      ((request_type == ZERO_QUERY_SUGGESTION) && (input_key_len == 0));
+      (request_type == ZERO_QUERY_SUGGESTION) && is_empty_input;
   size_t max_prediction_size =
       request.max_user_history_prediction_candidates_size();
   size_t max_prediction_char_coverage =
@@ -1239,7 +1232,7 @@ bool UserHistoryPredictor::ShouldPredict(RequestType request_type,
     return false;
   }
 
-  if (request.config().incognito_mode()) {
+  if (request.incognito_mode()) {
     MOZC_VLOG(2) << "incognito mode";
     return false;
   }
@@ -1451,21 +1444,16 @@ void UserHistoryPredictor::GetInputKeyFromSegments(
   DCHECK(input_key);
   DCHECK(base);
 
-  if (!request.has_composer()) {
-    *input_key = segments.conversion_segment(0).key();
-    *base = segments.conversion_segment(0).key();
-    return;
-  }
-
   *input_key = request.composer().GetStringForPreedit();
-  std::set<std::string> expanded_set;
-  request.composer().GetQueriesForPrediction(base, &expanded_set);
+  // auto = std::pair<std::string, absl::btree_set<std::string>>
+  const auto [query_base, expanded_set] =
+      request.composer().GetQueriesForPrediction();
+  *base = std::move(query_base);
   if (!expanded_set.empty()) {
     *expanded = std::make_unique<Trie<std::string>>();
-    for (std::set<std::string>::const_iterator itr = expanded_set.begin();
-         itr != expanded_set.end(); ++itr) {
+    for (const std::string &expanded_key : expanded_set) {
       // For getting matched key, insert values
-      (*expanded)->AddEntry(*itr, *itr);
+      (*expanded)->AddEntry(expanded_key, expanded_key);
     }
   }
 }
@@ -1519,7 +1507,7 @@ bool UserHistoryPredictor::InsertCandidates(RequestType request_type,
     LOG(ERROR) << "Unknown mode";
     return false;
   }
-  const uint32_t input_key_len = Util::CharsLen(segment->key());
+  const uint32_t input_key_len = segment->key_len();
 
   const int filter_mode =
       request.request()
@@ -1652,7 +1640,7 @@ bool UserHistoryPredictor::InsertCandidates(RequestType request_type,
       candidate->description = description;
       candidate->attributes |= Segment::Candidate::NO_EXTRA_DESCRIPTION;
     } else {
-      VariantsRewriter::SetDescriptionForPrediction(*pos_matcher_, candidate);
+      VariantsRewriter::SetDescriptionForPrediction(pos_matcher_, candidate);
     }
     MOZC_CANDIDATE_LOG(candidate,
                        "Added by UserHistoryPredictor::InsertCandidates");
@@ -1721,7 +1709,7 @@ bool UserHistoryPredictor::IsValidEntry(const Entry &entry) const {
 bool UserHistoryPredictor::IsValidEntryIgnoringRemovedField(
     const Entry &entry) const {
   if (entry.entry_type() != Entry::DEFAULT_ENTRY ||
-      suppression_dictionary_->SuppressEntry(entry.key(), entry.value())) {
+      user_dictionary_.IsSuppressedEntry(entry.key(), entry.value())) {
     return false;
   }
 
@@ -1853,33 +1841,8 @@ void UserHistoryPredictor::Insert(std::string key, std::string value,
   updated_ = true;
 }
 
-void UserHistoryPredictor::MaybeRecordUsageStats(
-    const Segments &segments) const {
-  const Segment &segment = segments.conversion_segment(0);
-  if (segment.candidates_size() < 1) {
-    MOZC_VLOG(2) << "candidates size < 1";
-    return;
-  }
-
-  const Segment::Candidate &candidate = segment.candidate(0);
-  if (segment.segment_type() != Segment::FIXED_VALUE) {
-    MOZC_VLOG(2) << "segment is not FIXED_VALUE" << candidate.value;
-    return;
-  }
-
-  if (!(candidate.source_info & Segment::Candidate::USER_HISTORY_PREDICTOR)) {
-    MOZC_VLOG(2) << "candidate is not from user_history_predictor";
-    return;
-  }
-
-  UsageStats::IncrementCount("CommitUserHistoryPredictor");
-  if (segment.key().empty()) {
-    UsageStats::IncrementCount("CommitUserHistoryPredictorZeroQuery");
-  }
-}
-
 void UserHistoryPredictor::MaybeRemoveUnselectedHistory(
-    const Segments &segments, float min_ratio) {
+    const Segments &segments) {
   const Segment &segment = segments.conversion_segment(0);
   if (segment.candidates_size() < 1 ||
       segment.segment_type() != Segment::FIXED_VALUE) {
@@ -1887,6 +1850,7 @@ void UserHistoryPredictor::MaybeRemoveUnselectedHistory(
   }
 
   static constexpr size_t kMaxHistorySize = 5;
+  static constexpr float kMinSelectedRatio = 0.05;
   for (size_t i = 0; i < std::min(segment.candidates_size(), kMaxHistorySize);
        ++i) {
     const Segment::Candidate &candidate = segment.candidate(i);
@@ -1902,7 +1866,7 @@ void UserHistoryPredictor::MaybeRemoveUnselectedHistory(
     const float selected_ratio =
         1.0 * std::max(entry->suggestion_freq(), entry->conversion_freq()) /
         entry->shown_freq();
-    if (selected_ratio < min_ratio) {
+    if (selected_ratio < kMinSelectedRatio) {
       entry->set_suggestion_freq(0);
       entry->set_conversion_freq(0);
       entry->set_shown_freq(0);
@@ -1919,7 +1883,7 @@ void UserHistoryPredictor::Finish(const ConversionRequest &request,
     return;
   }
 
-  if (request.config().incognito_mode()) {
+  if (request.incognito_mode()) {
     MOZC_VLOG(2) << "incognito mode";
     return;
   }
@@ -1944,8 +1908,6 @@ void UserHistoryPredictor::Finish(const ConversionRequest &request,
     LOG(WARNING) << "Syncer is running";
     return;
   }
-
-  MaybeRecordUsageStats(*segments);
 
   const RequestType request_type = request.request().zero_query_suggestion()
                                        ? ZERO_QUERY_SUGGESTION
@@ -2014,12 +1976,7 @@ void UserHistoryPredictor::Finish(const ConversionRequest &request,
 
   InsertHistory(request_type, is_suggestion, last_access_time, segments);
 
-  const float min_ratio = request.request()
-                              .decoder_experiment_params()
-                              .user_history_prediction_min_selected_ratio();
-  if (0.0 < min_ratio && min_ratio <= 1.0) {
-    MaybeRemoveUnselectedHistory(*segments, min_ratio);
-  }
+  MaybeRemoveUnselectedHistory(*segments);
 }
 
 UserHistoryPredictor::SegmentsForLearning

@@ -98,7 +98,7 @@ class EngineTest : public ::testing::Test {
 
   void SetUp() override {
     engine_ = Engine::CreateEngine();
-    engine_->SetAlwaysWaitForLoaderResponseFutureForTesting(true);
+    engine_->SetAlwaysWaitForTesting(true);
   }
 
   std::unique_ptr<Engine> engine_;
@@ -113,13 +113,12 @@ class EngineTest : public ::testing::Test {
 };
 
 TEST_F(EngineTest, ReloadModulesTest) {
-  SupplementalModelForTesting supplemental_model;
-  engine_->SetSupplementalModel(&supplemental_model);
-  EXPECT_EQ(engine_->GetModulesForTesting()->GetSupplementalModel(),
-            &supplemental_model);
+  std::unique_ptr<Modules> modules =
+      engine::Modules::Create(std::make_unique<testing::MockDataManager>())
+          .value();
 
-  auto modules = std::make_unique<engine::Modules>();
-  CHECK_OK(modules->Init(std::make_unique<testing::MockDataManager>()));
+  SupplementalModelForTesting supplemental_model;
+  modules->SetSupplementalModel(&supplemental_model);
 
   const bool is_mobile = true;
   CHECK_OK(engine_->ReloadModules(std::move(modules), is_mobile));
@@ -142,7 +141,7 @@ TEST_F(EngineTest, DataLoadSuccessfulScenarioTest) {
   EXPECT_EQ(engine_->GetDataVersion(), mock_version_);
 
   // The engine is not updated with the same request.
-  EXPECT_TRUE(engine_->SendEngineReloadRequest(mock_request_));
+  EXPECT_FALSE(engine_->SendEngineReloadRequest(mock_request_));
   EXPECT_FALSE(engine_->MaybeReloadEngine(&response));
   EXPECT_EQ(engine_->GetDataVersion(), mock_version_);
 }
@@ -173,7 +172,7 @@ TEST_F(EngineTest, ReloadInvalidDataTest) {
 
   // Sends the same request again, but the request is already marked as
   // unregistered.
-  EXPECT_TRUE(engine_->SendEngineReloadRequest(invalid_path_request_));
+  EXPECT_FALSE(engine_->SendEngineReloadRequest(invalid_path_request_));
   EXPECT_FALSE(engine_->MaybeReloadEngine(&response));
 }
 

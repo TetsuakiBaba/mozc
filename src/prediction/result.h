@@ -58,7 +58,7 @@ enum PredictionType {
   BIGRAM = 2,
   // suggests from immutable_converter
   REALTIME = 4,
-  // add suffixes like "さん", "が" which matches to the pevious context.
+  // add suffixes like "さん", "が" which matches to the previous context.
   SUFFIX = 8,
   // add English words.
   ENGLISH = 16,
@@ -83,9 +83,10 @@ enum PredictionType {
   // why 65536 is used to indicate that it is a temporary assignment.
   REALTIME_TOP = 65536,
 
-  // Kana modifier is expanded inside the dictionary lookup.
+  // Key is expanded inside the dictionary lookup.
+  // Usually Kana-modifiers are expanded.
   // TODO(taku): This label should be migrated to TYPING_CORRECTION.
-  KANA_MODIFIER_EXPANDED = 32768,
+  KEY_EXPANDED_IN_DICTIONARY = 32768,
 };
 // Bitfield to store a set of PredictionType.
 using PredictionTypes = int32_t;
@@ -219,7 +220,8 @@ void PopulateTypeCorrectedQuery(
   (result).log.append(MOZC_WORD_LOG_MESSAGE(message))
 #else  // NDEBUG
 #define MOZC_WORD_LOG(result, message) \
-  {}
+  {                                    \
+  }
 #endif  // NDEBUG
 
 }  // namespace prediction

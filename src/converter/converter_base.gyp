@@ -76,6 +76,7 @@
       'type': 'static_library',
       'sources': [
         '<(gen_out_mozc_dir)/dictionary/pos_matcher_impl.inc',
+        'candidate.cc',
         'candidate_filter.cc',
         'nbest_generator.cc',
         'segments.cc',

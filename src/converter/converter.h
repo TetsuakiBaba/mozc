@@ -32,18 +32,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
 
-#include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "converter/converter_interface.h"
+#include "converter/history_reconstructor.h"
 #include "converter/immutable_converter_interface.h"
+#include "converter/reverse_converter.h"
 #include "converter/segments.h"
+#include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
-#include "dictionary/suppression_dictionary.h"
 #include "engine/modules.h"
 #include "prediction/predictor_interface.h"
 #include "request/conversion_request.h"
@@ -54,47 +56,36 @@ namespace mozc {
 
 class Converter final : public ConverterInterface {
  public:
-  Converter() = default;
+  using ImmutableConverterFactory =
+      std::function<std::unique_ptr<const ImmutableConverterInterface>(
+          const engine::Modules &modules)>;
 
-  // Lazily initializes the internal members. Must be called before the use.
-  void Init(const engine::Modules &modules,
-            std::unique_ptr<prediction::PredictorInterface> predictor,
-            std::unique_ptr<RewriterInterface> rewriter,
-            ImmutableConverterInterface *immutable_converter);
+  using PredictorFactory =
+      std::function<std::unique_ptr<prediction::PredictorInterface>(
+          const engine::Modules &modules, const ConverterInterface &converter,
+          const ImmutableConverterInterface &immutable_converter)>;
 
-  ABSL_MUST_USE_RESULT
+  using RewriterFactory = std::function<std::unique_ptr<RewriterInterface>(
+      const engine::Modules &modules)>;
+
+  // Converter is initialized with the factory methods of ImmutableConverter,
+  // Predictor and Rewriter, so that all these sub components share the
+  // same resources and modules. Converter creates these sub modules and holds
+  // their ownership.
+  Converter(std::unique_ptr<engine::Modules> modules,
+            const ImmutableConverterFactory &immutable_converter_factory,
+            const PredictorFactory &predictor_factory,
+            const RewriterFactory &rewriter_factory);
+
+  [[nodiscard]]
   bool StartConversion(const ConversionRequest &request,
                        Segments *segments) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartConversionWithKey(Segments *segments,
-                              absl::string_view key) const override;
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool StartReverseConversion(Segments *segments,
                               absl::string_view key) const override;
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool StartPrediction(const ConversionRequest &request,
                        Segments *segments) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartPredictionWithKey(Segments *segments,
-                              absl::string_view key) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartSuggestion(const ConversionRequest &request,
-                       Segments *segments) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartSuggestionWithKey(Segments *segments,
-                              absl::string_view key) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartPartialPrediction(const ConversionRequest &request,
-                              Segments *segments) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartPartialPredictionWithKey(Segments *segments,
-                                     absl::string_view key) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartPartialSuggestion(const ConversionRequest &request,
-                              Segments *segments) const override;
-  ABSL_MUST_USE_RESULT
-  bool StartPartialSuggestionWithKey(Segments *segments,
-                                     absl::string_view key) const override;
 
   void FinishConversion(const ConversionRequest &request,
                         Segments *segments) const override;
@@ -102,43 +93,66 @@ class Converter final : public ConverterInterface {
   void ResetConversion(Segments *segments) const override;
   void RevertConversion(Segments *segments) const override;
 
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool DeleteCandidateFromHistory(const Segments &segments,
                                   size_t segment_index,
                                   int candidate_index) const override;
 
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool ReconstructHistory(Segments *segments,
                           absl::string_view preceding_text) const override;
 
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool CommitSegmentValue(Segments *segments, size_t segment_index,
                           int candidate_index) const override;
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool CommitPartialSuggestionSegmentValue(
       Segments *segments, size_t segment_index, int candidate_index,
       absl::string_view current_segment_key,
       absl::string_view new_segment_key) const override;
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool FocusSegmentValue(Segments *segments, size_t segment_index,
                          int candidate_index) const override;
-  ABSL_MUST_USE_RESULT
+  [[nodiscard]]
   bool CommitSegments(Segments *segments,
                       absl::Span<const size_t> candidate_index) const override;
-  ABSL_MUST_USE_RESULT bool ResizeSegment(Segments *segments,
-                                          const ConversionRequest &request,
-                                          size_t segment_index,
-                                          int offset_length) const override;
-  ABSL_MUST_USE_RESULT bool ResizeSegment(
+  [[nodiscard]] bool ResizeSegment(Segments *segments,
+                                   const ConversionRequest &request,
+                                   size_t segment_index,
+                                   int offset_length) const override;
+  [[nodiscard]] bool ResizeSegments(
       Segments *segments, const ConversionRequest &request,
-      size_t start_segment_index, size_t segments_size,
+      size_t start_segment_index,
       absl::Span<const uint8_t> new_size_array) const override;
+
+  // Execute ImmutableConverter, Rewriters, SuppressionDictionary.
+  // ApplyConversion does not initialize the Segment unlike StartConversion.
+  void ApplyConversion(Segments *segments,
+                       const ConversionRequest &request) const;
+
+  // Reloads internal data, e.g., user dictionary, etc.
+  bool Reload();
+
+  // Synchronizes internal data, e.g., user dictionary, etc.
+  bool Sync();
+
+  // Waits for pending operations executed in different threads.
+  bool Wait();
+
+  prediction::PredictorInterface *predictor() const { return predictor_.get(); }
+
+  RewriterInterface *rewriter() const { return rewriter_.get(); }
+
+  const ImmutableConverterInterface *immutable_converter() const {
+    return immutable_converter_.get();
+  }
+
+  engine::Modules *modules() const { return modules_.get(); }
 
  private:
   FRIEND_TEST(ConverterTest, CompletePosIds);
   FRIEND_TEST(ConverterTest, DefaultPredictor);
   FRIEND_TEST(ConverterTest, MaybeSetConsumedKeySizeToSegment);
-  FRIEND_TEST(ConverterTest, GetLastConnectivePart);
   FRIEND_TEST(ConverterTest, PredictSetKey);
 
   // Complete Left id/Right id if they are not defined.
@@ -171,31 +185,21 @@ class Converter final : public ConverterInterface {
   void TrimCandidates(const ConversionRequest &request,
                       Segments *segments) const;
 
-  // Commits usage stats for committed text.
-  // |begin_segment_index| is a index of whole segments. (history and conversion
-  // segments)
-  void CommitUsageStats(const Segments *segments, size_t begin_segment_index,
-                        size_t segment_length) const;
-
   // Returns the substring of |str|. This substring consists of similar script
   // type and you can use it as preceding text for conversion.
   bool GetLastConnectivePart(absl::string_view preceding_text, std::string *key,
                              std::string *value, uint16_t *id) const;
 
-  ABSL_MUST_USE_RESULT bool Predict(const ConversionRequest &request,
-                                    absl::string_view key,
-                                    Segments *segments) const;
-
-  ABSL_MUST_USE_RESULT bool Convert(const ConversionRequest &request,
-                                    absl::string_view key,
-                                    Segments *segments) const;
-
-  const dictionary::PosMatcher *pos_matcher_ = nullptr;
-  const dictionary::SuppressionDictionary *suppression_dictionary_;
+  std::unique_ptr<engine::Modules> modules_;
+  std::unique_ptr<const ImmutableConverterInterface> immutable_converter_;
   std::unique_ptr<prediction::PredictorInterface> predictor_;
   std::unique_ptr<RewriterInterface> rewriter_;
-  const ImmutableConverterInterface *immutable_converter_ = nullptr;
-  uint16_t general_noun_id_ = std::numeric_limits<uint16_t>::max();
+
+  const dictionary::PosMatcher &pos_matcher_;
+  const dictionary::UserDictionaryInterface &user_dictionary_;
+  const converter::HistoryReconstructor history_reconstructor_;
+  const converter::ReverseConverter reverse_converter_;
+  const uint16_t general_noun_id_ = std::numeric_limits<uint16_t>::max();
 };
 
 }  // namespace mozc

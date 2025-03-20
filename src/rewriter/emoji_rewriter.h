@@ -36,7 +36,7 @@
 #include "absl/strings/string_view.h"
 #include "base/container/serialized_string_array.h"
 #include "converter/segments.h"
-#include "data_manager/data_manager_interface.h"
+#include "data_manager/data_manager.h"
 #include "data_manager/emoji_data.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
@@ -71,7 +71,7 @@ class EmojiRewriter : public RewriterInterface {
   static constexpr size_t kEmojiDataByteLength = 28;
   using IteratorRange = std::pair<EmojiDataIterator, EmojiDataIterator>;
 
-  explicit EmojiRewriter(const DataManagerInterface &data_manager);
+  explicit EmojiRewriter(const DataManager &data_manager);
   EmojiRewriter(const EmojiRewriter &) = delete;
   EmojiRewriter &operator=(const EmojiRewriter &) = delete;
 
@@ -84,13 +84,6 @@ class EmojiRewriter : public RewriterInterface {
   // because of the interface.
   bool Rewrite(const ConversionRequest &request,
                Segments *segments) const override;
-
-  // Counts the number of segments in which emoji candidates are selected,
-  // and stores the result as usage stats.
-  // NOTE: This method is expected to be called after the segments are processed
-  // with COMMIT command in a SessionConverter instance.  May record wrong
-  // stats if you call this method in other situation.
-  void Finish(const ConversionRequest &request, Segments *segments) override;
 
   // Returns true if the given candidate includes emoji characters.
   // TODO(peria, hidehiko): Unify this checker and IsEmojiEntry defined in

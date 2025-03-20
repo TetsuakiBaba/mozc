@@ -32,12 +32,14 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "base/japanese_util.h"
 #include "base/number_util.h"
+#include "base/util.h"
 #include "config/character_form_manager.h"
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
@@ -59,10 +61,10 @@ using ::mozc::dictionary::PosMatcher;
 
 class VariantsRewriterTest : public testing::TestWithTempUserProfile {
  protected:
-  void SetUp() override {
-    Reset();
-    pos_matcher_.Set(mock_data_manager_.GetPosMatcherData());
-  }
+  VariantsRewriterTest()
+      : pos_matcher_(mock_data_manager_.GetPosMatcherData()) {}
+
+  void SetUp() override { Reset(); }
 
   void TearDown() override { Reset(); }
 
@@ -88,10 +90,11 @@ class VariantsRewriterTest : public testing::TestWithTempUserProfile {
     return new VariantsRewriter(pos_matcher_);
   }
 
-  PosMatcher pos_matcher_;
-
  private:
   const testing::MockDataManager mock_data_manager_;
+
+ protected:
+  const PosMatcher pos_matcher_;
 };
 
 TEST_F(VariantsRewriterTest, RewriteTest) {
@@ -589,6 +592,68 @@ TEST_F(VariantsRewriterTest, SetDescriptionForPrediction) {
   }
 }
 
+TEST_F(VariantsRewriterTest, GetFormTypesFromStringPair) {
+  constexpr std::pair<Util::FormType, Util::FormType> kUnknownForm = {
+      Util::UNKNOWN_FORM, Util::UNKNOWN_FORM};
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("", ""), kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("abc", "ab"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("abc", "abc"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("12", "12"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("あいう", "あいう"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("アイウ", "アイウ"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("愛", "恋"),
+            kUnknownForm);
+
+  constexpr std::pair<Util::FormType, Util::FormType> kHalfFullPair = {
+      Util::HALF_WIDTH, Util::FULL_WIDTH};
+  constexpr std::pair<Util::FormType, Util::FormType> kFullHalfPair = {
+      Util::FULL_WIDTH, Util::HALF_WIDTH};
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("ABC", "ＡＢＣ"),
+            kHalfFullPair);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("ａｂｃ", "abc"),
+            kFullHalfPair);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("おばQ", "おばＱ"),
+            kHalfFullPair);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("よろしくヨロシク",
+                                                         "よろしくﾖﾛｼｸ"),
+            kFullHalfPair);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("よろしくグーグル",
+                                                         "よろしくｸﾞｰｸﾞﾙ"),
+            kFullHalfPair);
+
+  // semi voice sound mark
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair(
+                "カッパよろしくグーグル", "ｶｯﾊﾟよろしくｸﾞｰｸﾞﾙ"),
+            kFullHalfPair);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("ヨロシクＱ", "ﾖﾛｼｸQ"),
+            kFullHalfPair);
+
+  // // mixed
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("ヨロシクQ", "ﾖﾛｼｸＱ"),
+            kUnknownForm);
+
+  EXPECT_EQ(VariantsRewriter::GetFormTypesFromStringPair("京都Qぐーぐる",
+                                                         "京都Ｑぐーぐる"),
+            kHalfFullPair);
+}
+
 TEST_F(VariantsRewriterTest, RewriteForConversion) {
   CharacterFormManager *character_form_manager =
       CharacterFormManager::GetCharacterFormManager();
@@ -667,8 +732,10 @@ TEST_F(VariantsRewriterTest, RewriteForPrediction) {
   CharacterFormManager *character_form_manager =
       CharacterFormManager::GetCharacterFormManager();
   std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::PREDICTION);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::PREDICTION)
+          .Build();
   {
     Segments segments;
     InitSegmentsForAlphabetRewrite("abc", &segments);
@@ -704,9 +771,11 @@ TEST_F(VariantsRewriterTest, RewriteForMixedConversion) {
   std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
   Request request;
   request.set_mixed_conversion(true);  // Request mixed conversion.
-  ConversionRequest conv_request;
-  conv_request.set_request(&request);
-  conv_request.set_request_type(ConversionRequest::SUGGESTION);
+  const ConversionRequest conv_request =
+      ConversionRequestBuilder()
+          .SetRequest(request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
   {
     Segments segments;
     InitSegmentsForAlphabetRewrite("abc", &segments);
@@ -785,9 +854,11 @@ TEST_F(VariantsRewriterTest, RewriteForPartialSuggestion) {
   std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
   Request request;
   request.set_mixed_conversion(true);  // Request mixed conversion.
-  ConversionRequest conv_request;
-  conv_request.set_request(&request);
-  conv_request.set_request_type(ConversionRequest::SUGGESTION);
+  const ConversionRequest conv_request =
+      ConversionRequestBuilder()
+          .SetRequest(request)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
   {
     Segments segments;
 
@@ -822,8 +893,10 @@ TEST_F(VariantsRewriterTest, RewriteForSuggestion) {
   CharacterFormManager *character_form_manager =
       CharacterFormManager::GetCharacterFormManager();
   std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
-  ConversionRequest request;
-  request.set_request_type(ConversionRequest::SUGGESTION);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
   {
     Segments segments;
     InitSegmentsForAlphabetRewrite("abc", &segments);
@@ -918,8 +991,8 @@ TEST_F(VariantsRewriterTest, LearningLevel) {
       CharacterFormManager::GetCharacterFormManager();
   config::Config config;
   config.set_history_learning_level(Config::NO_HISTORY);
-  ConversionRequest request;
-  request.set_config(&config);
+  const ConversionRequest request =
+      ConversionRequestBuilder().SetConfig(config).Build();
 
   Segments segments;
 

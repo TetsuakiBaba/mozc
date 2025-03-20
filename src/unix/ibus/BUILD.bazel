@@ -27,6 +27,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
     "mozc_cc_binary",
@@ -43,7 +45,7 @@ load(
     "LINUX_MOZC_SERVER_DIR",
 )
 
-package(default_visibility = ["//:__subpackages__"])
+package(default_visibility = ["//visibility:private"])
 
 licenses(["notice"])
 
@@ -65,6 +67,7 @@ genrule(
         "> $@",
     ]),
     tools = [":gen_mozc_xml_main"],
+    visibility = ["//unix:__subpackages__"],
 )
 
 genrule(
@@ -144,7 +147,7 @@ mozc_cc_library(
         "path_util.h",
     ],
     local_defines = [
-        "MOZC_IBUS_INSTALL_DIR=\\\"" + IBUS_MOZC_INSTALL_DIR + "\\\"",
+        'MOZC_IBUS_INSTALL_DIR=\\"' + IBUS_MOZC_INSTALL_DIR + '\\"',
     ],
     deps = [
         "//base:util",
@@ -210,8 +213,9 @@ mozc_cc_library(
         "//base:system_util",
         "//base:util",
         "//base:vlog",
+        "//base/container:flat_map",
         "//client",
-        "//protocol:candidates_cc_proto",
+        "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//renderer:renderer_client",
@@ -282,6 +286,7 @@ mozc_cc_binary(
         ":gen_mozc_xml",
         "//unix:icons",
     ],
+    visibility = ["//unix:__subpackages__"],
     deps = [
         ":ibus_config",
         ":ibus_header",
@@ -313,14 +318,12 @@ mozc_cc_test(
         "//base:port",
         "//base:util",
         "//base/protobuf",
-        "//client",
         "//client:client_mock",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//testing:gunit_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/random",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
     ],
 )
@@ -339,7 +342,7 @@ mozc_cc_library(
         ":ibus_header",
         "//base:coordinates",
         "//base:port",
-        "//protocol:candidates_cc_proto",
+        "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_client",
@@ -367,7 +370,7 @@ mozc_cc_test(
         ":candidate_window_handler",
         "//base:coordinates",
         "//base/protobuf:text_format",
-        "//protocol:candidates_cc_proto",
+        "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "//protocol:renderer_cc_proto",
         "//renderer:renderer_mock",

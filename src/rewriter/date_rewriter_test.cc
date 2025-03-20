@@ -31,6 +31,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,8 +48,6 @@
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_mock.h"
 #include "dictionary/dictionary_token.h"
-#include "engine/engine_interface.h"
-#include "engine/mock_data_engine_factory.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
@@ -68,8 +67,6 @@ using ::testing::ElementsAre;
 using ::testing::Field;
 using ::testing::Matcher;
 using ::testing::Not;
-using ::testing::Ref;
-using ::testing::Return;
 using ::testing::StrEq;
 using ::testing::Values;
 
@@ -554,8 +551,9 @@ TEST_F(DateRewriterTest, NumberRewriterTest) {
   DateRewriter rewriter;
   const commands::Request request;
   const config::Config config;
-  const composer::Composer composer(nullptr, &request, &config);
-  const ConversionRequest conversion_request(&composer, &request, &config);
+  const composer::Composer composer(request, config);
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder().SetComposer(composer).Build();
 
   // Not targets of rewrite.
   const char *kNonTargetCases[] = {
@@ -570,40 +568,31 @@ TEST_F(DateRewriterTest, NumberRewriterTest) {
   }
 
 // Macro for {"M/D", "日付"}
-#define DATE(month, day) \
-  { #month "/" #day, "日付" }
+#define DATE(month, day) {#month "/" #day, "日付"}
 
 // Macro for {"M月D日", "日付"}
-#define KANJI_DATE(month, day) \
-  { #month "月" #day "日", "日付" }
+#define KANJI_DATE(month, day) {#month "月" #day "日", "日付"}
 
 // Macro for {"H:M", "時刻"}
-#define TIME(hour, minute) \
-  { #hour ":" #minute, "時刻" }
+#define TIME(hour, minute) {#hour ":" #minute, "時刻"}
 
 // Macro for {"H時M分", "時刻"}
-#define KANJI_TIME(hour, minute) \
-  { #hour "時" #minute "分", "時刻" }
+#define KANJI_TIME(hour, minute) {#hour "時" #minute "分", "時刻"}
 
 // Macro for {"H時半", "時刻"}
-#define KANJI_TIME_HAN(hour) \
-  { #hour "時半", "時刻" }
+#define KANJI_TIME_HAN(hour) {#hour "時半", "時刻"}
 
 // Macro for {"午前H時M分", "時刻"}
-#define GOZEN(hour, minute) \
-  { "午前" #hour "時" #minute "分", "時刻" }
+#define GOZEN(hour, minute) {"午前" #hour "時" #minute "分", "時刻"}
 
 // Macro for {"午後H時M分", "時刻"}
-#define GOGO(hour, minute) \
-  { "午後" #hour "時" #minute "分", "時刻" }
+#define GOGO(hour, minute) {"午後" #hour "時" #minute "分", "時刻"}
 
 // Macro for {"午前H時半", "時刻"}
-#define GOZEN_HAN(hour) \
-  { "午前" #hour "時半", "時刻" }
+#define GOZEN_HAN(hour) {"午前" #hour "時半", "時刻"}
 
 // Macro for {"午後H時半", "時刻"}
-#define GOGO_HAN(hour) \
-  { "午後" #hour "時半", "時刻" }
+#define GOGO_HAN(hour) {"午後" #hour "時半", "時刻"}
 
   // Targets of rewrite.
   using ValueAndDescription = std::pair<const char *, const char *>;
@@ -914,14 +903,12 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
   Segments segments;
   DateRewriter rewriter;
 
-  composer::Table table;
-  table.AddRule("222", "c", "");
-  table.AddRule("3", "d", "");
+  auto table = std::make_shared<composer::Table>();
+  table->AddRule("222", "c", "");
+  table->AddRule("3", "d", "");
   const commands::Request request;
   const config::Config config;
-  composer::Composer composer(&table, &request, &config);
-  ConversionRequest conversion_request;
-  conversion_request.set_composer(&composer);
+  composer::Composer composer(table, request, config);
 
   // Key sequence : 2223
   // Preedit : cd
@@ -930,7 +917,10 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
     InitSegment("cd", "cd", &segments);
     composer.Reset();
     composer.InsertCharacter("2223");
-    EXPECT_TRUE(rewriter.Rewrite(conversion_request, &segments));
+    const ConversionRequest conv_request =
+        ConversionRequestBuilder().SetComposer(composer).Build();
+
+    EXPECT_TRUE(rewriter.Rewrite(conv_request, &segments));
     ASSERT_EQ(segments.segments_size(), 1);
     EXPECT_THAT(segments.segment(0), ContainsCandidate(ValueIs("22:23")));
   }
@@ -943,7 +933,9 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
     InitSegment("1111", "1111", &segments);
     composer.Reset();
     composer.InsertCharacter("2223");
-    EXPECT_TRUE(rewriter.Rewrite(conversion_request, &segments));
+    const ConversionRequest conv_request =
+        ConversionRequestBuilder().SetComposer(composer).Build();
+    EXPECT_TRUE(rewriter.Rewrite(conv_request, &segments));
     ASSERT_EQ(segments.segments_size(), 1);
     EXPECT_THAT(segments.segment(0), ContainsCandidate(ValueIs("11:11")));
     EXPECT_THAT(segments.segment(0), Not(ContainsCandidate(ValueIs("22:23"))));
@@ -960,7 +952,9 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
     meta_candidate->value = "1111";
     composer.InsertCharacter("2223");
     composer.Reset();
-    EXPECT_TRUE(rewriter.Rewrite(conversion_request, &segments));
+    const ConversionRequest conv_request =
+        ConversionRequestBuilder().SetComposer(composer).Build();
+    EXPECT_TRUE(rewriter.Rewrite(conv_request, &segments));
     ASSERT_EQ(segments.segments_size(), 1);
     EXPECT_THAT(segments.segment(0), ContainsCandidate(ValueIs("11:11")));
     EXPECT_THAT(segments.segment(0), Not(ContainsCandidate(ValueIs("22:23"))));
@@ -968,18 +962,20 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
 }
 
 TEST_F(DateRewriterTest, MobileEnvironmentTest) {
-  ConversionRequest convreq;
   commands::Request request;
-  convreq.set_request(&request);
   DateRewriter rewriter;
 
   {
     request.set_mixed_conversion(true);
+    const ConversionRequest convreq =
+        ConversionRequestBuilder().SetRequest(request).Build();
     EXPECT_EQ(rewriter.capability(convreq), RewriterInterface::ALL);
   }
 
   {
     request.set_mixed_conversion(false);
+    const ConversionRequest convreq =
+        ConversionRequestBuilder().SetRequest(request).Build();
     EXPECT_EQ(rewriter.capability(convreq), RewriterInterface::CONVERSION);
   }
 }
@@ -987,8 +983,7 @@ TEST_F(DateRewriterTest, MobileEnvironmentTest) {
 TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
   commands::Request request;
   const config::Config config;
-  const composer::Composer composer(nullptr, &request, &config);
-  const ConversionRequest conversion_request(&composer, &request, &config);
+  const composer::Composer composer(request, config);
 
   // Init an instance of Segments for this test.
   Segments test_segments;
@@ -1000,6 +995,10 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
   {
     request.set_special_romanji_table(
         commands::Request::QWERTY_MOBILE_TO_HALFWIDTHASCII);
+    const ConversionRequest conversion_request = ConversionRequestBuilder()
+                                                     .SetComposer(composer)
+                                                     .SetRequest(request)
+                                                     .Build();
 
     DateRewriter rewriter;
     Segments segments = test_segments;
@@ -1019,6 +1018,10 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
   {
     request.set_special_romanji_table(
         commands::Request::TOGGLE_FLICK_TO_HIRAGANA);
+    const ConversionRequest conversion_request = ConversionRequestBuilder()
+                                                     .SetComposer(composer)
+                                                     .SetRequest(request)
+                                                     .Build();
 
     DateRewriter rewriter;
     Segments segments = test_segments;
@@ -1037,8 +1040,9 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
 TEST_F(DateRewriterTest, ConsecutiveDigitsFromMetaCandidates) {
   commands::Request request;
   const config::Config config;
-  const composer::Composer composer(nullptr, &request, &config);
-  const ConversionRequest conversion_request(&composer, &request, &config);
+  const composer::Composer composer(request, config);
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder().SetComposer(composer).Build();
 
   Segments segments;
   InitSegment("nisen", "にせん", &segments);
@@ -1054,8 +1058,9 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsFromMetaCandidates) {
 TEST_F(DateRewriterTest, ConsecutiveDigitsWithMinusSign) {
   commands::Request request;
   const config::Config config;
-  const composer::Composer composer(nullptr, &request, &config);
-  const ConversionRequest conversion_request(&composer, &request, &config);
+  const composer::Composer composer(request, config);
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder().SetComposer(composer).Build();
 
   // Init an instance of Segments for this test.
   Segments segments;
@@ -1079,8 +1084,9 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsWithMinusSign) {
 TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionWithHistory) {
   commands::Request request;
   const config::Config config;
-  const composer::Composer composer(nullptr, &request, &config);
-  const ConversionRequest conversion_request(&composer, &request, &config);
+  const composer::Composer composer(request, config);
+  const ConversionRequest conversion_request =
+      ConversionRequestBuilder().SetComposer(composer).Build();
 
   Segments segments;
 
@@ -1119,7 +1125,7 @@ TEST_F(DateRewriterTest, ExtraFormatTest) {
       .WillOnce(InvokeCallbackWithUserDictionaryToken{"{YEAR}{MONTH}{DATE}"});
 
   MockConverter converter;
-  DateRewriter rewriter(&converter, &dictionary);
+  DateRewriter rewriter(dictionary);
 
   Segments segments;
   InitSegment("きょう", "今日", &segments);
@@ -1153,7 +1159,7 @@ TEST_F(DateRewriterTest, ExtraFormatSyntaxTest) {
                 LookupExact(StrEq(DateRewriter::kExtraFormatKey), _, _))
         .WillOnce(InvokeCallbackWithUserDictionaryToken{std::string(input)});
     MockConverter converter;
-    DateRewriter rewriter(&converter, &dictionary);
+    DateRewriter rewriter(dictionary);
     Segments segments;
     InitSegment("きょう", "今日", &segments);
     const ConversionRequest request;
@@ -1273,78 +1279,57 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(RewriteAdTest, MockConverter) {
   const RewriteAdData &data = GetParam();
   MockDictionary dictionary;
-  MockConverter converter;
-  DateRewriter rewriter(&converter, &dictionary);
+  DateRewriter rewriter(dictionary);
   Segments segments;
   for (const auto &[key, value] : data.segments) {
     AppendSegment(key, value, &segments);
   }
   const ConversionRequest request;
-  EXPECT_CALL(dictionary, LookupExact(_, _, _));
 
-  // If resizing, it should call `converter.ResizeSegment()`.
-  if (!data.resized_key.empty()) {
-    int resize_length = Util::CharsLen(data.resized_key) -
-                        Util::CharsLen(data.segments[data.segment_index].first);
-    EXPECT_CALL(converter, ResizeSegment(&segments, Ref(request),
-                                         data.segment_index, resize_length))
-        .WillOnce(Return(true));
-  }
-  EXPECT_EQ(rewriter.Rewrite(request, &segments),
-            !data.candidate.empty() || !data.resized_key.empty());
+  std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+      rewriter.CheckResizeSegmentsRequest(request, segments);
 
-  // The `MockConverter` doesn't actually resize, so don't check candidates if
-  // resized.
-  if (data.resized_key.empty() && !data.candidate.empty()) {
-    const Segment &segment = segments.segment(data.segment_index);
-    EXPECT_THAT(segment, ContainsCandidate(ValueIs(data.candidate)));
-  }
-}
+  if (data.resized_key.empty()) {
+    // Resize is not expected.
+    EXPECT_FALSE(resize_request.has_value());
 
-TEST_P(RewriteAdTest, MockDataManager) {
-  const RewriteAdData &data = GetParam();
-  MockDictionary dictionary;
-  std::unique_ptr<EngineInterface> engine =
-      MockDataEngineFactory::Create().value();
-  DateRewriter rewriter(engine->GetConverter(), &dictionary);
-  Segments segments;
-  for (const auto &[key, value] : data.segments) {
-    AppendSegment(key, value, &segments);
-  }
-  const ConversionRequest request;
-  EXPECT_CALL(dictionary, LookupExact(_, _, _));
-  EXPECT_EQ(rewriter.Rewrite(request, &segments),
-            !data.candidate.empty() || !data.resized_key.empty());
+    if (data.candidate.empty()) {
+      // Rewrite is not expected.
+      EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+    } else {
+      // Rewrite is expected.
+      EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+      const Segment &segment = segments.segment(data.segment_index);
+      EXPECT_THAT(segment, ContainsCandidate(ValueIs(data.candidate)));
+    }
 
-  EXPECT_EQ(segments.resized(), !data.resized_key.empty());
-  const Segment &segment = segments.segment(data.segment_index);
-  if (!data.resized_key.empty()) {
-    // If resized, the key should match the `resized_key`. The `MockDataManager`
-    // doesn't call `Rewriter::Rewrite()`, so candidates are not rewritten.
-    EXPECT_EQ(segment.key(), data.resized_key);
-  } else if (!data.candidate.empty()) {
-    // If not resized, the candidates should contain the `cadidate`.
-    EXPECT_THAT(segment, ContainsCandidate(ValueIs(data.candidate)));
+  } else {
+    // Resize is expected.
+    EXPECT_TRUE(resize_request.has_value());
+    EXPECT_EQ(resize_request->segment_index, data.segment_index);
+    EXPECT_EQ(resize_request->segment_sizes[0],
+              Util::CharsLen(data.resized_key));
   }
 }
 
 // Test if `Segments::set_resized(true)` prevents merging segments.
 TEST_F(DateRewriterTest, RewriteAdResizedSegments) {
   MockDictionary dictionary;
-  MockConverter converter;
-  DateRewriter rewriter(&converter, &dictionary);
+  DateRewriter rewriter(dictionary);
   Segments segments;
   InitSegment("へいせい", "平成", &segments);
   AppendSegment("23", "23", &segments);
   AppendSegment("ねん", "年", &segments);
   const ConversionRequest request;
   segments.set_resized(true);
-  EXPECT_FALSE(rewriter.Rewrite(request, &segments));
+
+  std::optional<RewriterInterface::ResizeSegmentsRequest> resize_request =
+      rewriter.CheckResizeSegmentsRequest(request, segments);
+  EXPECT_FALSE(resize_request.has_value());
 
   segments.set_resized(false);
-  EXPECT_CALL(converter, ResizeSegment(&segments, Ref(request), 0, 4))
-      .WillOnce(Return(true));
-  EXPECT_TRUE(rewriter.Rewrite(request, &segments));
+  resize_request = rewriter.CheckResizeSegmentsRequest(request, segments);
+  EXPECT_TRUE(resize_request.has_value());
 }
 
 }  // namespace mozc

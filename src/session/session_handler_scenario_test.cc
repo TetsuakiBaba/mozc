@@ -39,6 +39,7 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
 #include "base/file_stream.h"
@@ -49,7 +50,6 @@
 #include "request/request_test_util.h"
 #include "session/session_handler_test_util.h"
 #include "session/session_handler_tool.h"
-#include "testing/googletest.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
 
@@ -181,55 +181,6 @@ INSTANTIATE_TEST_SUITE_P(SessionHandlerScenarioParameters,
                          ::testing::ValuesIn(kScenarioFileList),
                          SessionHandlerScenarioTest::GetTestName);
 
-const char *kUsageStatsScenarioFileList[] = {
-#define DATA_DIR "test/session/scenario/usage_stats/"
-    DATA_DIR "auto_partial_suggestion.txt",
-    DATA_DIR "backspace_after_commit.txt",
-    DATA_DIR "backspace_after_commit_after_backspace.txt",
-    DATA_DIR "composition.txt",
-    DATA_DIR "continue_input.txt",
-    DATA_DIR "continuous_input.txt",
-    DATA_DIR "conversion.txt",
-    DATA_DIR "insert_space.txt",
-    DATA_DIR "language_aware_input.txt",
-    DATA_DIR "mouse_select_from_suggestion.txt",
-    DATA_DIR "multiple_backspace_after_commit.txt",
-    DATA_DIR "multiple_segments.txt",
-    DATA_DIR "numpad_in_direct_input_mode.txt",
-    DATA_DIR "prediction.txt",
-    DATA_DIR "select_candidates_in_multiple_segments.txt",
-    DATA_DIR "select_candidates_in_multiple_segments_and_expand_segment.txt",
-    DATA_DIR "select_minor_conversion.txt",
-    DATA_DIR "select_minor_prediction.txt",
-    DATA_DIR "select_prediction.txt",
-    DATA_DIR "select_t13n_by_key.txt",
-#ifndef __linux__
-    // This test requires cascading window.
-    // TODO(hsumita): Removes this ifndef block.
-    DATA_DIR "select_t13n_on_cascading_window.txt",
-#endif  // !__linux__
-    DATA_DIR "suggestion.txt",
-    DATA_DIR "switch_kana_type.txt",
-    DATA_DIR "zero_query_suggestion.txt",
-#undef DATA_DIR
-};
-INSTANTIATE_TEST_SUITE_P(SessionHandlerUsageStatsScenarioParameters,
-                         SessionHandlerScenarioTest,
-                         ::testing::ValuesIn(kUsageStatsScenarioFileList),
-                         SessionHandlerScenarioTest::GetTestName);
-
-// Temporarily disabled test scenario.
-//
-// NOTE: If you want to have test scenario which does not pass at this
-// moment but for the recording, you can describe it as follows.
-const char *kFailedScenarioFileList[] = {
-    // Requires multiple session handling.
-    "data/test/session/scenario/usage_stats/multiple_sessions.txt",
-};
-INSTANTIATE_TEST_SUITE_P(DISABLED_SessionHandlerScenarioParameters,
-                         SessionHandlerScenarioTest,
-                         ::testing::ValuesIn(kFailedScenarioFileList));
-
 void ParseLine(SessionHandlerInterpreter &handler, const std::string &line) {
   std::vector<std::string> args = handler.Parse(line);
   if (args.empty()) {
@@ -264,7 +215,18 @@ TEST_P(SessionHandlerScenarioTest, TestImplBase) {
 
 class SessionHandlerScenarioTestForRequest
     : public SessionHandlerScenarioTestBase,
-      public WithParamInterface<std::tuple<const char *, commands::Request>> {};
+      public WithParamInterface<std::tuple<const char *, commands::Request>> {
+ public:
+  static std::string GetTestName(
+      const ::testing::TestParamInfo<ParamType> &info) {
+    return absl::StrCat(
+        info.index, "_",
+        absl::StrReplaceAll(
+            FileUtil::Basename(
+                FileUtil::NormalizeDirectorySeparator(std::get<0>(info.param))),
+            {{".", "_"}}));
+  }
+};
 
 const char *kScenariosForExperimentParams[] = {
 #define DATA_DIR "test/session/scenario/"
@@ -273,6 +235,7 @@ const char *kScenariosForExperimentParams[] = {
     DATA_DIR "mobile_preedit.txt",
     DATA_DIR "mobile_qwerty_transliteration_scenario.txt",
     DATA_DIR "mobile_revert_user_history_learning.txt",
+    DATA_DIR "mobile_switch_input_mode.txt",
     DATA_DIR "mobile_t13n_candidates.txt",
     DATA_DIR "mobile_zero_query.txt",
 #undef DATA_DIR
@@ -294,15 +257,10 @@ INSTANTIATE_TEST_SUITE_P(
             []() {
               auto request = GetMobileRequest();
               request.mutable_decoder_experiment_params()
-                  ->set_enable_realtime_conversion_candidate_checker(true);
-              return request;
-            }(),
-            []() {
-              auto request = GetMobileRequest();
-              request.mutable_decoder_experiment_params()
                   ->set_enable_findability_oriented_order(true);
               return request;
-            }())));
+            }())),
+    SessionHandlerScenarioTestForRequest::GetTestName);
 
 TEST_P(SessionHandlerScenarioTestForRequest, TestImplBase) {
   // Open the scenario file.

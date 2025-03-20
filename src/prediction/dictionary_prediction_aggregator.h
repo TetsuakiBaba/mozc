@@ -64,8 +64,8 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
   ~DictionaryPredictionAggregator() override = default;
 
   DictionaryPredictionAggregator(
-      const engine::Modules &modules, const ConverterInterface *converter,
-      const ImmutableConverterInterface *immutable_converter);
+      const engine::Modules &modules, const ConverterInterface &converter,
+      const ImmutableConverterInterface &immutable_converter);
 
   std::vector<Result> AggregateResults(const ConversionRequest &request,
                                        const Segments &segments) const override;
@@ -146,7 +146,7 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
   void CheckBigramResult(const dictionary::Token &history_token,
                          Util::ScriptType history_ctype,
                          Util::ScriptType last_history_ctype,
-                         const ConversionRequest &request,
+                         const ConversionRequest &request, bool is_zero_query,
                          Result *result) const;
 
   static void GetPredictiveResults(
@@ -286,10 +286,10 @@ class DictionaryPredictionAggregator : public PredictionAggregatorInterface {
   friend class DictionaryPredictionAggregatorTestPeer;
 
   const engine::Modules &modules_;
-  const ConverterInterface *converter_;
-  const ImmutableConverterInterface *immutable_converter_;
-  const dictionary::DictionaryInterface *dictionary_;
-  const dictionary::DictionaryInterface *suffix_dictionary_;
+  const ConverterInterface &converter_;
+  const ImmutableConverterInterface &immutable_converter_;
+  const dictionary::DictionaryInterface &dictionary_;
+  const dictionary::DictionaryInterface &suffix_dictionary_;
   const uint16_t counter_suffix_word_id_;
   const uint16_t kanji_number_id_;
   const uint16_t zip_code_id_;

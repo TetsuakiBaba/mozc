@@ -39,8 +39,8 @@
 
 #include "absl/container/btree_set.h"
 #include "absl/strings/str_format.h"
-#include "data_manager/data_manager_interface.h"
-#include "dictionary/user_pos_interface.h"
+#include "data_manager/data_manager.h"
+#include "dictionary/user_pos.h"
 
 namespace mozc {
 namespace rewriter {
@@ -80,7 +80,7 @@ bool operator<(const Token &lhs, const Token &rhs);
 
 class DictionaryGenerator {
  public:
-  explicit DictionaryGenerator(const DataManagerInterface &data_manager);
+  explicit DictionaryGenerator(const DataManager &data_manager);
 
   DictionaryGenerator(DictionaryGenerator &&) = default;
   DictionaryGenerator &operator=(DictionaryGenerator &&) = default;
@@ -93,7 +93,7 @@ class DictionaryGenerator {
 
  private:
   absl::btree_set<Token> tokens_;
-  std::unique_ptr<const UserPosInterface> user_pos_;
+  std::unique_ptr<const dictionary::UserPos> user_pos_;
   uint16_t open_bracket_id_;
   uint16_t close_bracket_id_;
 };
